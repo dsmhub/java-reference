@@ -1,0 +1,959 @@
+<html>
+
+<head>
+<meta charset="utf-8">
+<meta http-equiv=Content-Type content="text/html; charset=windows-1252">
+<meta name=Generator content="Microsoft Word 15 (filtered)">
+<style>
+<!--
+ /* Font Definitions */
+ @font-face
+	{font-family:"Cambria Math";
+	panose-1:2 4 5 3 5 4 6 3 2 4;}
+@font-face
+	{font-family:Calibri;
+	panose-1:2 15 5 2 2 2 4 3 2 4;}
+@font-face
+	{font-family:"Calibri Light";
+	panose-1:2 15 3 2 2 2 4 3 2 4;}
+@font-face
+	{font-family:"Yu Gothic Light";
+	panose-1:2 11 3 0 0 0 0 0 0 0;}
+@font-face
+	{font-family:"Yu Mincho";
+	panose-1:2 2 4 0 0 0 0 0 0 0;}
+@font-face
+	{font-family:"\@Yu Mincho";}
+@font-face
+	{font-family:"\@Yu Gothic Light";}
+ /* Style Definitions */
+ p.MsoNormal, li.MsoNormal, div.MsoNormal
+	{margin-top:0cm;
+	margin-right:0cm;
+	margin-bottom:8.0pt;
+	margin-left:0cm;
+	line-height:115%;
+	font-size:12.0pt;
+	font-family:"Calibri",sans-serif;}
+h1
+	{mso-style-link:"Heading 1 Char";
+	margin-top:18.0pt;
+	margin-right:0cm;
+	margin-bottom:4.0pt;
+	margin-left:0cm;
+	line-height:115%;
+	page-break-after:avoid;
+	font-size:20.0pt;
+	font-family:"Calibri Light",sans-serif;
+	color:#2F5496;
+	font-weight:normal;}
+h2
+	{mso-style-link:"Heading 2 Char";
+	margin-top:8.0pt;
+	margin-right:0cm;
+	margin-bottom:4.0pt;
+	margin-left:0cm;
+	line-height:115%;
+	page-break-after:avoid;
+	font-size:16.0pt;
+	font-family:"Calibri Light",sans-serif;
+	color:#2F5496;
+	font-weight:normal;}
+span.Heading1Char
+	{mso-style-name:"Heading 1 Char";
+	mso-style-link:"Heading 1";
+	font-family:"Calibri Light",sans-serif;
+	color:#2F5496;}
+span.Heading2Char
+	{mso-style-name:"Heading 2 Char";
+	mso-style-link:"Heading 2";
+	font-family:"Calibri Light",sans-serif;
+	color:#2F5496;}
+.MsoChpDefault
+	{font-size:12.0pt;
+	font-family:"Calibri",sans-serif;}
+.MsoPapDefault
+	{margin-bottom:8.0pt;
+	line-height:115%;}
+@page WordSection1
+	{size:595.3pt 841.9pt;
+	margin:72.0pt 72.0pt 72.0pt 72.0pt;}
+div.WordSection1
+	{page:WordSection1;}
+-->
+</style>
+
+</head>
+
+<body lang=EN-GB style='word-wrap:break-word'>
+
+<div class=WordSection1>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<h1>Spring dependencies and errors during compilation</h1>
+
+<p class=MsoNormal>Errors that occur if a basic dependency is missing.</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<table class=MsoNormalTable border=1 cellspacing=0 cellpadding=0 title=""
+ summary="" style='margin-left:24.0pt;border-collapse:collapse;border:none'>
+ <tr>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Jdk</span></b></p>
+  </td>
+  <td width=80 valign=top style='width:59.7pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Language Level</span></b></p>
+  </td>
+  <td width=200 valign=top style='width:149.75pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Library (selected by maven)</span></b></p>
+  </td>
+  <td width=184 valign=top style='width:137.65pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Library (manual download)</span></b></p>
+  </td>
+  <td width=240 valign=top style='width:180.0pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Error</span></b></p>
+  </td>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Jdk</span></b></p>
+  </td>
+  <td width=72 valign=top style='width:53.7pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Language Level</span></b></p>
+  </td>
+ </tr>
+ <tr>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=78 valign=top style='width:58.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=200 valign=top style='width:149.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-context\6.1.11\spring-context-6.1.11.jar</p>
+  </td>
+  <td width=182 valign=top style='width:136.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-context\6.2.1\spring-context-6.2.1.jar</p>
+  </td>
+  <td width=242 valign=top style='width:181.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>java.lang.ClassNotFoundException:
+  org.springframework.core.env.Environment</p>
+  <p class=MsoNormal>&nbsp;</p>
+  <p class=MsoNormal>Or</p>
+  <p class=MsoNormal>&nbsp;</p>
+  <p class=MsoNormal>class file for org.springframework.context.ConfigurableApplicationContext
+  not found</p>
+  </td>
+  <td width=64 valign=top style='width:48.0pt;border-top:none;border-left:none;
+  border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+  <td width=62 valign=top style='width:46.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=78 valign=top style='width:58.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=200 valign=top style='width:149.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-beans\6.1.11\spring-beans-6.1.11.jar</p>
+  </td>
+  <td width=184 valign=top style='width:137.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-beans\6.2.1\spring-beans-6.2.1.jar</p>
+  </td>
+  <td width=242 valign=top style='width:181.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbspjava.lang.ClassNotFoundException:
+  org.springframework.beans.factory.config.BeanFactoryPostProcessor</p>
+  <p class=MsoNormal>&nbsp;</p>
+  <p class=MsoNormal>Or</p>
+  <p class=MsoNormal>&nbsp;</p>
+  <p class=MsoNormal>java.lang.ClassNotFoundException:
+  org.springframework.beans.factory.config.ConfigurableBeanFactory</p>
+  </td>
+  <td width=64 valign=top style='width:48.0pt;border-top:none;border-left:none;
+  border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+  <td width=62 valign=top style='width:46.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=78 valign=top style='width:58.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=200 valign=top style='width:149.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-core\6.1.11\spring-core-6.1.11.jar</p>
+  </td>
+  <td width=182 valign=top style='width:136.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-core\6.2.1\spring-core-6.2.1.jar</p>
+  </td>
+  <td width=242 valign=top style='width:181.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>java.lang.ClassNotFoundException:
+  org.springframework.core.env.ConfigurableEnvironment</p>
+  </td>
+  <td width=64 valign=top style='width:48.0pt;border-top:none;border-left:none;
+  border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+  <td width=62 valign=top style='width:46.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=78 valign=top style='width:58.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=202 valign=top style='width:151.2pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>io\micrometer\micrometer-commons\1.12.8\micrometer-commons-1.12.8.jar</p>
+  </td>
+  <td width=182 valign=top style='width:136.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>commons-logging\commons-logging\1.2\commons-logging-1.2.jar</p>
+  </td>
+  <td width=242 valign=top style='width:181.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>java.lang.ClassNotFoundException:
+  org.apache.commons.logging.LogFactory</p>
+  </td>
+  <td width=64 valign=top style='width:48.0pt;border-top:none;border-left:none;
+  border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+  <td width=62 valign=top style='width:46.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=78 valign=top style='width:58.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=200 valign=top style='width:149.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-aop\6.1.11\spring-aop-6.1.11.jar</p>
+  </td>
+  <td width=182 valign=top style='width:136.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-aop\6.2.1\spring-aop-6.2.1.jar</p>
+  </td>
+  <td width=242 valign=top style='width:181.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>java.lang.ClassNotFoundException:
+  org.springframework.aop.framework.AopProxyUtils</p>
+  </td>
+  <td width=64 valign=top style='width:48.0pt;border-top:none;border-left:none;
+  border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+  <td width=62 valign=top style='width:46.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=78 valign=top style='width:58.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=200 valign=top style='width:149.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-expression\6.1.11\spring-expression-6.1.11.jar</p>
+  </td>
+  <td width=184 valign=top style='width:137.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-expression\6.2.1\spring-expression-6.2.1.jar</p>
+  </td>
+  <td width=242 valign=top style='width:181.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>java.lang.ClassNotFoundException:
+  org.springframework.expression.ParserContext</p>
+  </td>
+  <td width=64 valign=top style='width:48.0pt;border-top:none;border-left:none;
+  border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+  <td width=62 valign=top style='width:46.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>17</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=78 valign=top style='width:58.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=200 valign=top style='width:149.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>io\micrometer\micrometer-observation\1.12.8\micrometer-observation-1.12.8.jar</p>
+  </td>
+  <td width=182 valign=top style='width:136.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=240 valign=top style='width:180.0pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=64 valign=top style='width:48.0pt;border-top:none;border-left:none;
+  border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=51 valign=top style='width:38.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=78 valign=top style='width:58.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>18</p>
+  </td>
+  <td width=200 valign=top style='width:149.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>org\springframework\spring-jcl\6.1.11\spring-jcl-6.1.11.jar</p>
+  </td>
+  <td width=182 valign=top style='width:136.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=240 valign=top style='width:180.0pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=64 valign=top style='width:48.0pt;border-top:none;border-left:none;
+  border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=51 valign=top style='width:38.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=64 valign=top style='width:48.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=78 valign=top style='width:58.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=200 valign=top style='width:149.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=182 valign=top style='width:136.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=240 valign=top style='width:180.0pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=64 valign=top style='width:48.0pt;border-top:none;border-left:none;
+  border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+  <td width=51 valign=top style='width:38.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>&nbsp;</p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>class file for org.springframework.context.ConfigurableApplicationContext
+not found</p>
+
+<p class=MsoNormal>java.lang.ClassNotFoundException:
+org.springframework.core.env.ConfigurableEnvironment</p>
+
+<p class=MsoNormal>java.lang.ClassNotFoundException:
+org.springframework.beans.factory.config.ConfigurableBeanFactory</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Error Starting ApplicationContext</p>
+
+<p class=MsoNormal>Caused by: java.lang.IllegalStateException: Could not
+evaluate condition on
+org.springframework.boot.autoconfigure.r2dbc.ConnectionFactoryConfigurations$PoolConfiguration
+due to io/r2dbc/spi/ValidationDepth not found. Make sure your own configuration
+does not rely on that class. This can also happen if you are @ComponentScanning
+a springframework package (e.g. if you put a @ComponentScan in the default
+package by mistake)</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Caused by: java.lang.ClassNotFoundException: io.r2dbc.spi.ValidationDepth</p>
+
+<p class=MsoNormal>&nbsp;&nbsp;</p>
+
+<p class=MsoNormal><b>Do not use default package</b></p>
+
+<p class=MsoNormal><b>places classes inside a package in src/main/java
+directory e.g. com.domain.appname, com.example.myapp</b></p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<h2>Dependencies and errors (during compilation)</h2>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Exception in thread &quot;main&quot;
+java.lang.NoClassDefFoundError: org/springframework/core/env/Environment</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at SpringBoot.main(SpringBoot.java:7)</p>
+
+<p class=MsoNormal>Caused by: java.lang.ClassNotFoundException:
+org.springframework.core.env.Environment</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp C:\Users\&lt;username&gt;\.m2\repository\org\springframework\spring-context\6.2.1\spring-context-6.2.1.jar</b></p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Exception in thread &quot;main&quot;
+java.lang.NoClassDefFoundError:
+org/springframework/beans/factory/config/BeanFactoryPostProcessor</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at SpringBoot.main(SpringBoot.java:7)</p>
+
+<p class=MsoNormal>Caused by: java.lang.ClassNotFoundException:
+org.springframework.beans.factory.config.BeanFactoryPostProcessor</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp C:\Users\&lt;username&gt;\.m2\repository\org\springframework\spring-beans\6.2.1\spring-beans-6.2.1.jar</b></p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Exception in thread &quot;main&quot;
+java.lang.NoClassDefFoundError:
+org/springframework/core/env/ConfigurableEnvironment</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at SpringBoot.main(SpringBoot.java:7)</p>
+
+<p class=MsoNormal>Caused by: java.lang.ClassNotFoundException:
+org.springframework.core.env.ConfigurableEnvironment</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp C:\Users\&lt;username&gt;\.m2\repository\org\springframework\spring-core\6.2.1\spring-core-6.2.1.jar</b></p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Exception in thread &quot;main&quot;
+java.lang.NoClassDefFoundError: org/apache/commons/logging/LogFactory</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.&lt;clinit&gt;(SpringApplication.java:203)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at SpringBoot.main(SpringBoot.java:7)</p>
+
+<p class=MsoNormal>Caused by: java.lang.ClassNotFoundException:
+org.apache.commons.logging.LogFactory</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp C:\Users\&lt;username&gt;\.m2\repository\commons-logging\commons-logging\1.2\commons-logging-1.2.jar</b></p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp </p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp </p>
+
+<p class=MsoNormal>Exception in thread &quot;main&quot;
+java.lang.NoClassDefFoundError: org/springframework/aop/framework/AopProxyUtils</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.event.AbstractApplicationEventMulticaster.addApplicationListener(AbstractApplicationEventMulticaster.java:110)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.lang.Iterable.forEach(Iterable.java:75)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.event.EventPublishingRunListener.refreshApplicationListeners(EventPublishingRunListener.java:140)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.event.EventPublishingRunListener.multicastInitialEvent(EventPublishingRunListener.java:135)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.event.EventPublishingRunListener.starting(EventPublishingRunListener.java:75)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplicationRunListeners.lambda$starting$0(SpringApplicationRunListeners.java:54)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.lang.Iterable.forEach(Iterable.java:75)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplicationRunListeners.doWithListeners(SpringApplicationRunListeners.java:118)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplicationRunListeners.starting(SpringApplicationRunListeners.java:54)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:327)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:1363)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:1352)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at SpringBoot.main(SpringBoot.java:7)</p>
+
+<p class=MsoNormal>Caused by: java.lang.ClassNotFoundException:
+org.springframework.aop.framework.AopProxyUtils</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp C:\Users\&lt;username&gt;\.m2\repository\org\springframework\spring-aop\6.2.1\spring-aop-6.2.1.jar</b></p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>java.lang.NoClassDefFoundError:
+org/springframework/expression/ParserContext</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at org.springframework.context.support.AbstractApplicationContext.prepareBeanFactory(AbstractApplicationContext.java:728)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:601)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.refresh(SpringApplication.java:754)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:456)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:335)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:1363)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:1352)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at SpringBoot.main(SpringBoot.java:7)</p>
+
+<p class=MsoNormal>Caused by: java.lang.ClassNotFoundException:
+org.springframework.expression.ParserContext</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Exception in thread &quot;main&quot;
+java.lang.IllegalStateException: java.lang.NoClassDefFoundError:
+org/springframework/expression/ParserContext</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.handleRunFailure(SpringApplication.java:825)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:345)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:1363)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:1352)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at SpringBoot.main(SpringBoot.java:7)</p>
+
+<p class=MsoNormal>Caused by: java.lang.NoClassDefFoundError:
+org/springframework/expression/ParserContext</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Caused by: java.lang.ClassNotFoundException:
+org.springframework.expression.ParserContext</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp C:\Users\&lt;username&gt;\.m2\repository\org\springframework\spring-expression\6.2.1\spring-expression-6.2.1.jar</b></p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp </p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp </p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp </p>
+
+<p class=MsoNormal>** WARNING ** : Your ApplicationContext is unlikely to start
+due to a @ComponentScan of the default package.</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>[2025-03-17 14:27:47.234] - 23308 WARNING [main] ---
+org.springframework.context.annotation.AnnotationConfigApplicationContext:
+Exception encountered during context initialization - cancelling refresh
+attempt: org.springframework.beans.factory.BeanDefinitionStoreException: Failed
+to read candidate component class: URL
+[jar:file:/C:/Users/Hanzo/.m2/repository/org/springframework/boot/spring-boot-autoconfigure/3.3.2/spring-boot-autoconfigure-3.3.2.jar!/org/springframework/boot/autoconfigure/r2dbc/ConnectionFactoryConfigurations$PoolConfiguration.class]</p>
+
+<p class=MsoNormal>[2025-03-17 14:27:47.242] - 23308 INFO [main] ---
+org.springframework.boot.autoconfigure.logging.ConditionEvaluationReportLogger:
+</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Error starting ApplicationContext. To display the condition
+evaluation report re-run your application with 'debug' enabled.</p>
+
+<p class=MsoNormal>[2025-03-17 14:27:47.272] - 23308 SEVERE [main] ---
+org.springframework.boot.SpringApplication: Application run failed</p>
+
+<p class=MsoNormal>org.springframework.beans.factory.BeanDefinitionStoreException:
+Failed to read candidate component class: URL
+[jar:file:/C:/Users/Hanzo/.m2/repository/org/springframework/boot/spring-boot-autoconfigure/3.3.2/spring-boot-autoconfigure-3.3.2.jar!/org/springframework/boot/autoconfigure/r2dbc/ConnectionFactoryConfigurations$PoolConfiguration.class]</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider.scanCandidateComponents(ClassPathScanningCandidateComponentProvider.java:510)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider.findCandidateComponents(ClassPathScanningCandidateComponentProvider.java:351)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ClassPathBeanDefinitionScanner.doScan(ClassPathBeanDefinitionScanner.java:277)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ComponentScanAnnotationParser.parse(ComponentScanAnnotationParser.java:128)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ConfigurationClassParser.doProcessConfigurationClass(ConfigurationClassParser.java:306)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ConfigurationClassParser.processConfigurationClass(ConfigurationClassParser.java:246)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ConfigurationClassParser.parse(ConfigurationClassParser.java:197)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ConfigurationClassParser.parse(ConfigurationClassParser.java:165)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ConfigurationClassPostProcessor.processConfigBeanDefinitions(ConfigurationClassPostProcessor.java:417)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ConfigurationClassPostProcessor.postProcessBeanDefinitionRegistry(ConfigurationClassPostProcessor.java:290)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.support.PostProcessorRegistrationDelegate.invokeBeanDefinitionRegistryPostProcessors(PostProcessorRegistrationDelegate.java:349)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.support.PostProcessorRegistrationDelegate.invokeBeanFactoryPostProcessors(PostProcessorRegistrationDelegate.java:118)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.support.AbstractApplicationContext.invokeBeanFactoryPostProcessors(AbstractApplicationContext.java:789)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:607)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.refresh(SpringApplication.java:754)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:456)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:335)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:1363)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.SpringApplication.run(SpringApplication.java:1352)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at SpringBoot.main(SpringBoot.java:7)</p>
+
+<p class=MsoNormal>Caused by: java.lang.IllegalStateException: Could not
+evaluate condition on
+org.springframework.boot.autoconfigure.r2dbc.ConnectionFactoryConfigurations$PoolConfiguration
+due to io/r2dbc/spi/ValidationDepth not found. Make sure your own configuration
+does not rely on that class. This can also happen if you are @ComponentScanning
+a springframework package (e.g. if you put a @ComponentScan in the default
+package by mistake)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.autoconfigure.condition.SpringBootCondition.matches(SpringBootCondition.java:54)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ConditionEvaluator.shouldSkip(ConditionEvaluator.java:108)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ConditionEvaluator.shouldSkip(ConditionEvaluator.java:88)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at org.springframework.context.annotation.ConditionEvaluator.shouldSkip(ConditionEvaluator.java:71)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider.isConditionMatch(ClassPathScanningCandidateComponentProvider.java:564)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider.isCandidateComponent(ClassPathScanningCandidateComponentProvider.java:547)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider.scanCandidateComponents(ClassPathScanningCandidateComponentProvider.java:471)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp ... 19 more</p>
+
+<p class=MsoNormal>Caused by: java.lang.NoClassDefFoundError:
+io/r2dbc/spi/ValidationDepth</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.lang.Class.getDeclaredFields0(Native Method)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.lang.Class.privateGetDeclaredFields(Class.java:3297)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.lang.Class.getDeclaredField(Class.java:2608)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.DefaultBindConstructorProvider$Constructors.isInnerClass(DefaultBindConstructorProvider.java:144)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.DefaultBindConstructorProvider$Constructors.getCandidateConstructors(DefaultBindConstructorProvider.java:134)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.DefaultBindConstructorProvider$Constructors.getConstructors(DefaultBindConstructorProvider.java:103)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.DefaultBindConstructorProvider.getBindConstructor(DefaultBindConstructorProvider.java:42)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.ValueObjectBinder$ValueObject.get(ValueObjectBinder.java:208)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.ValueObjectBinder.bind(ValueObjectBinder.java:75)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder.lambda$bindDataObject$6(Binder.java:480)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.util.stream.ReferencePipeline$3$1.accept(ReferencePipeline.java:197)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.util.AbstractList$RandomAccessSpliterator.tryAdvance(AbstractList.java:706)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.util.stream.ReferencePipeline.forEachWithCancel(ReferencePipeline.java:129)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.util.stream.AbstractPipeline.copyIntoWithCancel(AbstractPipeline.java:527)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.util.stream.AbstractPipeline.copyInto(AbstractPipeline.java:513)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.util.stream.AbstractPipeline.wrapAndCopyInto(AbstractPipeline.java:499)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.util.stream.FindOps$FindOp.evaluateSequential(FindOps.java:150)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.util.stream.AbstractPipeline.evaluate(AbstractPipeline.java:234)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.util.stream.ReferencePipeline.findFirst(ReferencePipeline.java:647)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder.fromDataObjectBinders(Binder.java:488)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder.lambda$bindDataObject$7(Binder.java:479)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder$Context.withIncreasedDepth(Binder.java:597)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder$Context.withDataObject(Binder.java:583)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder.bindDataObject(Binder.java:479)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder.bindObject(Binder.java:418)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder.bind(Binder.java:350)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder.bind(Binder.java:339)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder.bind(Binder.java:269)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.context.properties.bind.Binder.bind(Binder.java:230)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.autoconfigure.r2dbc.ConnectionFactoryConfigurations$PooledConnectionFactoryCondition.getMatchOutcome(ConnectionFactoryConfigurations.java:155)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+org.springframework.boot.autoconfigure.condition.SpringBootCondition.matches(SpringBootCondition.java:47)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp ... 25 more</p>
+
+<p class=MsoNormal>Caused by: java.lang.ClassNotFoundException:
+io.r2dbc.spi.ValidationDepth</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)</p>
+
+<p class=MsoNormal>&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp at
+java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:520)</p>
+
+<p class=MsoNormal> ... 56 more</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>Do not use default package - places classes inside a
+package in src/main/java directory e.g. com.domain.appname, com.example.myapp</b></p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+</div>
+
+</body>
+
+</html>
