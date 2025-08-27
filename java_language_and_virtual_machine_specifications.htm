@@ -1,0 +1,910 @@
+<html>
+
+<head>
+<meta charset="utf-8">
+<meta http-equiv=Content-Type content="text/html; charset=windows-1252">
+<meta name=Generator content="Microsoft Word 15 (filtered)">
+<style>
+<!--
+ /* Font Definitions */
+ @font-face
+	{font-family:"Cambria Math";
+	panose-1:2 4 5 3 5 4 6 3 2 4;}
+@font-face
+	{font-family:Calibri;
+	panose-1:2 15 5 2 2 2 4 3 2 4;}
+@font-face
+	{font-family:"Calibri Light";
+	panose-1:2 15 3 2 2 2 4 3 2 4;}
+@font-face
+	{font-family:"Yu Gothic Light";
+	panose-1:2 11 3 0 0 0 0 0 0 0;}
+@font-face
+	{font-family:"Yu Mincho";
+	panose-1:2 2 4 0 0 0 0 0 0 0;}
+@font-face
+	{font-family:"\@Yu Mincho";}
+@font-face
+	{font-family:"\@Yu Gothic Light";}
+ /* Style Definitions */
+ p.MsoNormal, li.MsoNormal, div.MsoNormal
+	{margin-top:0cm;
+	margin-right:0cm;
+	margin-bottom:8.0pt;
+	margin-left:0cm;
+	line-height:115%;
+	font-size:12.0pt;
+	font-family:"Calibri",sans-serif;}
+h1
+	{mso-style-link:"Heading 1 Char";
+	margin-top:18.0pt;
+	margin-right:0cm;
+	margin-bottom:4.0pt;
+	margin-left:0cm;
+	line-height:115%;
+	page-break-after:avoid;
+	font-size:20.0pt;
+	font-family:"Calibri Light",sans-serif;
+	color:#2F5496;
+	font-weight:normal;}
+a:link, span.MsoHyperlink
+	{color:#0563C1;
+	text-decoration:underline;}
+span.Heading1Char
+	{mso-style-name:"Heading 1 Char";
+	mso-style-link:"Heading 1";
+	font-family:"Calibri Light",sans-serif;
+	color:#2F5496;}
+.MsoChpDefault
+	{font-size:12.0pt;
+	font-family:"Calibri",sans-serif;}
+.MsoPapDefault
+	{margin-bottom:8.0pt;
+	line-height:115%;}
+@page WordSection1
+	{size:595.3pt 841.9pt;
+	margin:72.0pt 72.0pt 72.0pt 72.0pt;}
+div.WordSection1
+	{page:WordSection1;}
+-->
+</style>
+
+</head>
+
+<body lang=EN-GB link="#0563C1" vlink="#954F72" style='word-wrap:break-word'>
+
+<div class=WordSection1>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<h1>Java Language and Virtual Machine Specifications</h1>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>Java Language and Virtual Machine Specifications</b> - <a
+href="https://docs.oracle.com/javase/specs/">https://docs.oracle.com/javase/specs/</a></p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>Types, Values &amp; Variable</b>s - <a
+href="https://docs.oracle.com/javase/specs/jls/se10/html/jls-4.html">https://docs.oracle.com/javase/specs/jls/se10/html/jls-4.html</a></p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>Memory Types in Java</b></p>
+
+<table class=MsoNormalTable border=1 cellspacing=0 cellpadding=0 title=""
+ summary="" style='border-collapse:collapse;border:none'>
+ <tr>
+  <td width=99 valign=top style='width:74.6pt;border:solid #A3A3A3 1.0pt;
+  background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Aspect</span></b></p>
+  </td>
+  <td width=237 valign=top style='width:177.9pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Stack Memory</span></b></p>
+  </td>
+  <td width=211 valign=top style='width:158.25pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Heap Memory</span></b></p>
+  </td>
+ </tr>
+ <tr>
+  <td width=99 valign=top style='width:74.6pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Purpose</p>
+  </td>
+  <td width=239 valign=top style='width:179.3pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Stores method calls &amp; local variables</p>
+  </td>
+  <td width=222 valign=top style='width:166.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Stores objects &amp; instance variables</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=99 valign=top style='width:74.6pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Lifetime</p>
+  </td>
+  <td width=237 valign=top style='width:177.9pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Temporary (per method call)</p>
+  </td>
+  <td width=224 valign=top style='width:167.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Long-lived (until garbage-collected)</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=101 valign=top style='width:76.05pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Access Speed</p>
+  </td>
+  <td width=237 valign=top style='width:177.9pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Faster</p>
+  </td>
+  <td width=209 valign=top style='width:156.9pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Slower</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=99 valign=top style='width:74.6pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Allocation</p>
+  </td>
+  <td width=237 valign=top style='width:177.9pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Auto (when method is called)</p>
+  </td>
+  <td width=211 valign=top style='width:158.25pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Manual (new keyword)</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=101 valign=top style='width:76.05pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Management</p>
+  </td>
+  <td width=237 valign=top style='width:177.9pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>LIFO</p>
+  </td>
+  <td width=209 valign=top style='width:156.9pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Garbage Collected</p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>Variable Types in Java</b></p>
+
+<table class=MsoNormalTable border=1 cellspacing=0 cellpadding=0 title=""
+ summary="" style='border-collapse:collapse;border:none'>
+ <tr>
+  <td width=123 valign=top style='width:92.0pt;border:solid #A3A3A3 1.0pt;
+  background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Aspect</span></b></p>
+  </td>
+  <td width=254 valign=top style='width:190.5pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Local Variables</span></b></p>
+  </td>
+  <td width=268 valign=top style='width:200.75pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Instance Variables</span></b></p>
+  </td>
+ </tr>
+ <tr>
+  <td width=123 valign=top style='width:92.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Defined In</p>
+  </td>
+  <td width=254 valign=top style='width:190.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Methods, blocks, constructors</p>
+  </td>
+  <td width=268 valign=top style='width:200.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Class (outside methods)</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=123 valign=top style='width:92.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Scope</p>
+  </td>
+  <td width=254 valign=top style='width:190.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Limited to method/block</p>
+  </td>
+  <td width=270 valign=top style='width:202.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Entire object (all methods of the instance)</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=123 valign=top style='width:92.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Lifetime</p>
+  </td>
+  <td width=254 valign=top style='width:190.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Until method/block ends</p>
+  </td>
+  <td width=268 valign=top style='width:200.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Until object is garbage-collected</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=125 valign=top style='width:93.4pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Memory Location</p>
+  </td>
+  <td width=254 valign=top style='width:190.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Stack</p>
+  </td>
+  <td width=266 valign=top style='width:199.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Heap</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=123 valign=top style='width:92.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Requires&nbsp;this</p>
+  </td>
+  <td width=254 valign=top style='width:190.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>No</p>
+  </td>
+  <td width=268 valign=top style='width:200.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Yes (if name conflicts exist)</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=123 valign=top style='width:92.0pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Initialization</p>
+  </td>
+  <td width=256 valign=top style='width:191.9pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Must be manually initialized before use</p>
+  </td>
+  <td width=280 valign=top style='width:210.25pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Auto-initialized to default values (e.g. 0, null)</p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>Java SE: The Big Picture</b> - <a
+href="https://app.pluralsight.com/library/courses/java-se-17-big-picture/table-of-contents">https://app.pluralsight.com/library/courses/java-se-17-big-picture/table-of-contents</a></p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Java Platform - Java Core Programming Language, Java Runtime
+Environment, Java Standard Library</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Java Core Programming Language - Language syntax, Primitive
+types, Control structures, Operators, Arrays</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><b>Java Type System</b></p>
+
+<table class=MsoNormalTable border=1 cellspacing=0 cellpadding=0 title=""
+ summary="" style='border-collapse:collapse;border:none'>
+ <tr>
+  <td width=536 valign=top style='width:402.1pt;border:solid #A3A3A3 1.0pt;
+  background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Primitive Types</span></b></p>
+  </td>
+  <td width=492 valign=top style='width:369.15pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Reference Types</span></b></p>
+  </td>
+ </tr>
+ <tr>
+  <td width=536 valign=top style='width:402.1pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Built-in, non-object types that store actual values
+  directly in memory (stack if local/heap if in object)</p>
+  </td>
+  <td width=492 valign=top style='width:369.15pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Types that store references (memory addresses) to objects
+  on the heap</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=536 valign=top style='width:402.1pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>8 in total - boolean, byte, short, char, int, long, float,
+  double</p>
+  </td>
+  <td width=492 valign=top style='width:369.15pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Unlimited number; four main categories - classes,
+  interfaces, arrays, and type variables</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=536 valign=top style='width:402.1pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Always immutable - values held in a variable are swapped,
+  the value itself remains fixed</p>
+  </td>
+  <td width=492 valign=top style='width:369.15pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Mutable - ArrayList, StringBuilder, most custom classes</p>
+  <p class=MsoNormal>Immutable - String, Integer, LocalDateTime (once created,
+  state cannot be changed/mutated)</p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<table class=MsoNormalTable border=1 cellspacing=0 cellpadding=0 title=""
+ summary="" style='border-collapse:collapse;border:none'>
+ <tr>
+  <td width=121 valign=top style='width:91.1pt;border:solid #A3A3A3 1.0pt;
+  background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Reference Types</span></b></p>
+  </td>
+  <td width=386 valign=top style='width:289.35pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Categories</span></b></p>
+  </td>
+ </tr>
+ <tr>
+  <td width=120 valign=top style='width:89.7pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Classes</p>
+  </td>
+  <td width=388 valign=top style='width:290.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Java Standard library, Third-party libraries, User-defined</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=120 valign=top style='width:89.7pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Interfaces</p>
+  </td>
+  <td width=388 valign=top style='width:290.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Java Standard library, Third-party libraries, User-defined</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=120 valign=top style='width:89.7pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Arrays</p>
+  </td>
+  <td width=388 valign=top style='width:290.75pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Java Core Programming Language</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=120 valign=top style='width:89.7pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Type Variables</p>
+  </td>
+  <td width=394 valign=top style='width:295.8pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Java Standard library (place holders for types - used in
+  generics)</p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>Functional Groupings</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<table class=MsoNormalTable border=1 cellspacing=0 cellpadding=0 title=""
+ summary="" style='border-collapse:collapse;border:none'>
+ <tr>
+  <td width=79 valign=top style='width:59.1pt;border:solid #A3A3A3 1.0pt;
+  background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Category</span></b></p>
+  </td>
+  <td width=641 valign=top style='width:480.4pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Subcategories</span></b></p>
+  </td>
+  <td width=261 valign=top style='width:195.85pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Notes</span></b></p>
+  </td>
+ </tr>
+ <tr>
+  <td width=79 valign=top style='width:59.1pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Classes</p>
+  </td>
+  <td width=642 valign=top style='width:481.8pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Collections, Utility, Wrappers, IO, Time, Concurrency,
+  GUI, Networking, Security, Reflection, Annotations</p>
+  </td>
+  <td width=274 valign=top style='width:205.35pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Java adds new APIs; domains are expanding</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=81 valign=top style='width:60.5pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Interfaces</p>
+  </td>
+  <td width=641 valign=top style='width:480.4pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Collections, Functional, Marker, Comparable/Comparator,
+  Event Handling, Annotation, GUI, Remote</p>
+  </td>
+  <td width=264 valign=top style='width:197.8pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Many niche interfaces in specialized APIs</p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<table class=MsoNormalTable border=1 cellspacing=0 cellpadding=0 title=""
+ summary="" style='border-collapse:collapse;border:none'>
+ <tr>
+  <td width=192 valign=top style='width:143.95pt;border:solid #A3A3A3 1.0pt;
+  background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Interfaces - Standard Library</span></b></p>
+  </td>
+  <td width=302 valign=top style='width:226.5pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Purpose</span></b></p>
+  </td>
+  <td width=307 valign=top style='width:230.1pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Examples</span></b></p>
+  </td>
+ </tr>
+ <tr>
+  <td width=190 valign=top style='width:142.5pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Functional Interfaces</p>
+  </td>
+  <td width=302 valign=top style='width:226.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Define single-method contracts for lambdas.</p>
+  </td>
+  <td width=309 valign=top style='width:231.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Runnable,&nbsp;Callable,&nbsp;Comparator</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=190 valign=top style='width:142.5pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Collection Interfaces</p>
+  </td>
+  <td width=302 valign=top style='width:226.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Represent data structures (lists, sets, maps).</p>
+  </td>
+  <td width=309 valign=top style='width:231.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>List,&nbsp;Set,&nbsp;Map,&nbsp;Queue</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=190 valign=top style='width:142.5pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Marker Interfaces</p>
+  </td>
+  <td width=304 valign=top style='width:227.9pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Tag classes with special behavior (no methods).</p>
+  </td>
+  <td width=307 valign=top style='width:230.1pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Serializable,&nbsp;Cloneable</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=190 valign=top style='width:142.5pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Comparable/Comparator</p>
+  </td>
+  <td width=302 valign=top style='width:226.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Enable object comparison.</p>
+  </td>
+  <td width=309 valign=top style='width:231.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Comparable,&nbsp;Comparator</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=190 valign=top style='width:142.5pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Event Handling Interfaces</p>
+  </td>
+  <td width=302 valign=top style='width:226.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Handle user interactions (e.g., GUI events).</p>
+  </td>
+  <td width=309 valign=top style='width:231.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>ActionListener,&nbsp;KeyListener</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=190 valign=top style='width:142.5pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Annotation Interfaces</p>
+  </td>
+  <td width=302 valign=top style='width:226.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Define custom annotations.</p>
+  </td>
+  <td width=309 valign=top style='width:231.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Retention,&nbsp;Target</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=190 valign=top style='width:142.5pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Remote Interfaces</p>
+  </td>
+  <td width=302 valign=top style='width:226.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Support remote method invocation (RMI).</p>
+  </td>
+  <td width=309 valign=top style='width:231.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Remote,&nbsp;RemoteException</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=190 valign=top style='width:142.5pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>GUI Interfaces</p>
+  </td>
+  <td width=302 valign=top style='width:226.5pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Contracts for UI components/events</p>
+  </td>
+  <td width=321 valign=top style='width:241.0pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>ComponentListener, MouseListener (Swing-related)</p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<table class=MsoNormalTable border=1 cellspacing=0 cellpadding=0 title=""
+ summary="" style='border-collapse:collapse;border:none'>
+ <tr>
+  <td width=177 valign=top style='width:132.6pt;border:solid #A3A3A3 1.0pt;
+  background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Classes - Standard Library</span></b></p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Purpose</span></b></p>
+  </td>
+  <td width=255 valign=top style='width:191.1pt;border:solid #A3A3A3 1.0pt;
+  border-left:none;background:#F2F2F2;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal><b><span style='color:black'>Examples</span></b></p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Collections Classes</p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Implement data structures (lists, sets, maps)</p>
+  </td>
+  <td width=257 valign=top style='width:192.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>ArrayList, HashSet, HashMap</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Utility Classes</p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Reusable, stateless helper methods</p>
+  </td>
+  <td width=263 valign=top style='width:197.15pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Collections (utility), Arrays, Objects, Math</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>I/O Classes</p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Handle input/output operations</p>
+  </td>
+  <td width=257 valign=top style='width:192.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>File, InputStream, OutputStream</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Concurrency Classes</p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Manage multi-threading and synchronization.</p>
+  </td>
+  <td width=257 valign=top style='width:192.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Thread, ExecutorService, Lock</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Wrapper Classes</p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Wrap primitives into objects</p>
+  </td>
+  <td width=257 valign=top style='width:192.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Integer, Double, Boolean</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Time Classes</p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Handle dates, times, and time zones.</p>
+  </td>
+  <td width=269 valign=top style='width:201.95pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>LocalDate, LocalDateTime, ZonedDateTime</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>GUI Classes</p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Support graphical user interfaces (e.g., Swing, JavaFX).</p>
+  </td>
+  <td width=257 valign=top style='width:192.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>JFrame (Swing), Stage (JavaFX)</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Networking Classes</p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Enable network communication.</p>
+  </td>
+  <td width=257 valign=top style='width:192.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Socket, URL, HttpURLConnection</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Security Classes</p>
+  </td>
+  <td width=357 valign=top style='width:267.9pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Handle encryption, authentication, and security policies.</p>
+  </td>
+  <td width=255 valign=top style='width:191.1pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>MessageDigest, Cipher, Policy</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Reflection Classes</p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Inspect/manipulate classes/methods at runtime</p>
+  </td>
+  <td width=257 valign=top style='width:192.45pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Class, Method, Field</p>
+  </td>
+ </tr>
+ <tr>
+  <td width=175 valign=top style='width:131.2pt;border:solid #A3A3A3 1.0pt;
+  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Annotation Classes</p>
+  </td>
+  <td width=355 valign=top style='width:266.55pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Define metadata for code (e.g.,&nbsp;@Override).</p>
+  </td>
+  <td width=267 valign=top style='width:200.1pt;border-top:none;border-left:
+  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
+  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
+  <p class=MsoNormal>Override, Deprecated, FunctionalInterface</p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><a
+href="https://docs.oracle.com/javase/8/docs/technotes/guides/collections/">https://docs.oracle.com/javase/8/docs/technotes/guides/collections/</a></p>
+
+<p class=MsoNormal><a
+href="https://docs.oracle.com/javase/8/docs/technotes/guides/collections/reference.html">https://docs.oracle.com/javase/8/docs/technotes/guides/collections/reference.html</a></p>
+
+<p class=MsoNormal>&nbsp;&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+<p class=MsoNormal><a href="https://java-programming.mooc.fi/">https://java-programming.mooc.fi/</a></p>
+
+<p class=MsoNormal>&nbsp;</p>
+
+</div>
+
+</body>
+
+</html>
