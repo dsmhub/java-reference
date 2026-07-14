@@ -527,17 +527,14 @@ public final class TestSkeletonGenerator {
                 .addAnnotation(BEFORE_EACH)
                 .addModifiers(Modifier.PUBLIC);
 
-        List&lt;MockRef&gt; fieldMocks = new ArrayList&lt;&gt;();
-        for (Field field : sut.getDeclaredFields()) {
-            if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
-                continue;
-            }
+        List&lt;FieldMockRef&gt; fieldMocks = new ArrayList&lt;&gt;();
+        for (Field field : instanceFields(sut)) {
             Class&lt;?&gt; ft = field.getType();
             if (!ft.isInterface()) {
                 continue;
             }
             String var = field.getName() + &quot;Mock&quot;;
-            fieldMocks.add(new MockRef(ft, var));
+            fieldMocks.add(new FieldMockRef(ft, var, field.getDeclaringClass(), field.getName()));
             b.addStatement(&quot;$T $L = $T.mock($T.class)&quot;,
                     ClassName.get(ft), var, MOCKITO, ClassName.get(ft));
         }
@@ -547,17 +544,16 @@ public final class TestSkeletonGenerator {
         } else {
             CodeBlock.Builder chain = CodeBlock.builder().add(&quot;sut = $T.of($T.class)&quot;,
                     INSTANCIO, ClassName.get(sut));
-            for (MockRef mock : fieldMocks) {
-                String fieldName = mock.varName.replace(&quot;Mock&quot;, &quot;&quot;);
+            for (FieldMockRef mock : fieldMocks) {
                 chain.add(&quot;&#92;n    .set($T.field($T.class, $S), $L)&quot;,
-                        SELECT, ClassName.get(sut), fieldName, mock.varName);
+                        SELECT, ClassName.get(mock.declaringClass), mock.fieldName, mock.varName);
             }
             chain.add(&quot;&#92;n    .create();&#92;n&quot;);
             b.addCode(chain.build());
         }
 
-        for (MockRef mock : fieldMocks) {
-            b.addCode(minimalStubs(mock));
+        for (FieldMockRef mock : fieldMocks) {
+            b.addCode(minimalStubs(new MockRef(mock.type(), mock.varName())));
         }
         return b.build();
     }
@@ -627,6 +623,20 @@ public final class TestSkeletonGenerator {
             b.addStatement(&quot;$T.assertNotNull(result)&quot;, ASSERTIONS);
         }
         return b.build();
+    }
+
+    private static List&lt;Field&gt; instanceFields(Class&lt;?&gt; sut) {
+        List&lt;Field&gt; fields = new ArrayList&lt;&gt;();
+        Class&lt;?&gt; cur = sut;
+        while (cur != null &amp;&amp; cur != Object.class) {
+            for (Field field : cur.getDeclaredFields()) {
+                if (!java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                    fields.add(field);
+                }
+            }
+            cur = cur.getSuperclass();
+        }
+        return fields;
     }
 
     /** No declared instance methods but has static methods — utility/facade shape. */
@@ -866,6 +876,8 @@ public final class TestSkeletonGenerator {
     }
 
     private record MockRef(Class&lt;?&gt; type, String varName) {}
+
+    private record FieldMockRef(Class&lt;?&gt; type, String varName, Class&lt;?&gt; declaringClass, String fieldName) {}
 }
 </pre>
 </div>
