@@ -484,10 +484,8 @@ public final class TestSkeletonGenerator {
         TypeSpec.Builder testClass = TypeSpec.classBuilder(testSimpleName)
                 .addModifiers(Modifier.PUBLIC)
                 .addJavadoc(
-                        &quot;AUTO-GENERATED arrange skeleton for $L.
-&quot;
-                                + &quot;Locals per test; smoke asserts; Duo fills real asserts later.
-&quot;,
+                        &quot;AUTO-GENERATED arrange skeleton for $L.\n&quot;
+                                + &quot;Locals per test; smoke asserts; Duo fills real asserts later.\n&quot;,
                         sut.getName());
 
         if (!instanceMethods.isEmpty()) {
@@ -503,8 +501,7 @@ public final class TestSkeletonGenerator {
         }
         if (instanceMethods.isEmpty() &amp;&amp; staticMethods.isEmpty()) {
             System.out.println(&quot;WARN no public methods: &quot; + sut.getName());
-            testClass.addJavadoc(&quot;No public methods discovered.
-&quot;);
+            testClass.addJavadoc(&quot;No public methods discovered.\n&quot;);
         }
 
         JavaFile.builder(testPackage, testClass.build())
@@ -606,32 +603,27 @@ public final class TestSkeletonGenerator {
     private static CodeBlock arrangeLine(Class&lt;?&gt; type, String varName, List&lt;MockRef&gt; mocks) {
         if (type.isInterface()) {
             mocks.add(new MockRef(type, varName));
-            return CodeBlock.of(&quot;$T $L = $T.mock($T.class);
-&quot;,
+            return CodeBlock.of(&quot;$T $L = $T.mock($T.class);\n&quot;,
                     ClassName.get(type), varName, MOCKITO, ClassName.get(type));
         }
         if (type == Class.class) {
             // Instancio cannot create java.lang.Class — use a stable literal for smoke
-            return CodeBlock.of(&quot;$T&lt;?&gt; $L = $T.class;
-&quot;,
+            return CodeBlock.of(&quot;$T&lt;?&gt; $L = $T.class;\n&quot;,
                     ClassName.get(Class.class), varName, ClassName.get(String.class));
         }
         if (type == java.math.BigDecimal.class) {
             // Random BigDecimal often trips domain guards (e.g. minimum checks)
-            return CodeBlock.of(&quot;$T $L = $T.ZERO;
-&quot;,
+            return CodeBlock.of(&quot;$T $L = $T.ZERO;\n&quot;,
                     ClassName.get(java.math.BigDecimal.class), varName,
                     ClassName.get(java.math.BigDecimal.class));
         }
         if (type.isPrimitive()) {
             Class&lt;?&gt; boxed = box(type);
-            return CodeBlock.of(&quot;$T $L = $T.create($T.class);
-&quot;,
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;,
                     ClassName.get(boxed), varName, INSTANCIO, ClassName.get(boxed));
         }
         TypeName tn = javaPoetType(type);
-        return CodeBlock.of(&quot;$T $L = $T.create($T.class);
-&quot;, tn, varName, INSTANCIO, tn);
+        return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;, tn, varName, INSTANCIO, tn);
     }
 
     /**
@@ -677,7 +669,7 @@ public final class TestSkeletonGenerator {
 
     private static String primitiveDefaultExpr(Class&lt;?&gt; prim) {
         if (prim == boolean.class) return &quot;false&quot;;
-        if (prim == char.class) return &quot;&#x27;\0&#x27;&quot;;
+        if (prim == char.class) return &quot;&#x27;\\0&#x27;&quot;;
         return &quot;0&quot;;
     }
 
