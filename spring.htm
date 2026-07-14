@@ -409,18 +409,18 @@ div.WordSection1
 <p class=MsoNormal>&nbsp;</p>
 
 
-<p class=MsoNormal><b>TestSkeletonGenerator (JavaPoet batch skeleton — Cursor demo reference)</b></p><p class=MsoNormal>Source of truth also lives under Cursor workspace <code>experiments/instancio-pipeline-demo/.../TestSkeletonGenerator.java</code>. Input list: <code>src/test/resources/testgen/classes.txt</code>. Run with working directory = module root. Contract: Instancio + mock + minimal stub + act + smoke assert; instance and static; thin subclass pulls interface + immediate parent methods only; array params/returns via TypeName.</p>
+<p class=MsoNormal><b>TestSkeletonGenerator (JavaPoet batch skeleton — Cursor demo reference)</b></p><p class=MsoNormal>Source of truth also lives under Cursor workspace <code>experiments/instancio-pipeline-demo/.../TestSkeletonGenerator.java</code>. Input list: <code>src/test/resources/testgen/classes.txt</code>. Run with working directory = module root. Contract: Instancio + mock + minimal stub + act + smoke assert; instance and static; thin subclass pulls interface + immediate parent methods only; array params/returns via TypeName; output class is ClassNameTest (not SkeletonTest); Instancio SUT via @BeforeEach.</p>
 <pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package demo.walkthrough.testgen;
 
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.CodeBlock;
+import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
 
 import javax.lang.model.element.Modifier;
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.nio.file.Files;
@@ -428,7 +428,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -436,12 +435,12 @@ import java.util.Set;
 
 /**
  * Batch skeleton generator:
- * - Instancio for concrete types, Mockito.mock for interfaces
- * - minimal stubbing so smoke act does not NPE
- * - instance + static in same class
- * - SUT contract methods: declared; if empty/thin → overrides + interfaces + immediate parent (not whole hierarchy)
+ * - Instancio for concrete types + SUT instance (not manual ctor wiring)
+ * - Mockito.mock for interfaces; minimal stubbing for smoke act
+ * - instance + static in same class; static-only SUTs get static tests only
+ * - SUT contract methods: declared; if empty/thin → interfaces + immediate parent
  * - smoke assertNotNull / assertTrue
- * - skip if *SkeletonTest already exists
+ * - skip if *Test already exists
  *
  * Run with working directory = module root. Input: src/test/resources/testgen/classes.txt
  */
@@ -454,6 +453,7 @@ public final class TestSkeletonGenerator {
     private static final ClassName MOCKITO = ClassName.get(&quot;org.mockito&quot;, &quot;Mockito&quot;);
     private static final ClassName MATCHERS = ClassName.get(&quot;org.mockito&quot;, &quot;ArgumentMatchers&quot;);
     private static final ClassName TEST = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Test&quot;);
+    private static final ClassName BEFORE_EACH = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;BeforeEach&quot;);
     private static final ClassName ASSERTIONS = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Assertions&quot;);
 
     public static void main(String[] args) throws Exception {
@@ -469,7 +469,7 @@ public final class TestSkeletonGenerator {
 
     static void writeSkeleton(Class&lt;?&gt; sut, Path testSourceRoot) throws Exception {
         String testPackage = sut.getPackageName();
-        String testSimpleName = sut.getSimpleName() + &quot;SkeletonTest&quot;;
+        String testSimpleName = sut.getSimpleName() + &quot;Test&quot;;
         Path target = testSourceRoot
                 .resolve(testPackage.replace(&#x27;.&#x27;, &#x27;/&#x27;))
                 .resolve(testSimpleName + &quot;.java&quot;);
@@ -478,30 +478,37 @@ public final class TestSkeletonGenerator {
             return;
         }
 
-        List&lt;Method&gt; instanceMethods = contractInstanceMethods(sut);
+        boolean staticOnly = isStaticOnlyClass(sut);
+        List&lt;Method&gt; instanceMethods = staticOnly ? List.of() : contractInstanceMethods(sut);
         List&lt;Method&gt; staticMethods = contractStaticMethods(sut);
+        boolean staticPrefix = !staticOnly &amp;&amp; !instanceMethods.isEmpty();
 
         TypeSpec.Builder testClass = TypeSpec.classBuilder(testSimpleName)
                 .addModifiers(Modifier.PUBLIC)
                 .addJavadoc(
-                        &quot;AUTO-GENERATED arrange skeleton for $L.\n&quot;
-                                + &quot;Locals per test; smoke asserts; Duo fills real asserts later.\n&quot;,
+                        &quot;AUTO-GENERATED arrange skeleton for $L.&#92;n&quot;
+                                + &quot;Instancio SUT + locals per test; Duo fills real asserts later.&#92;n&quot;,
                         sut.getName());
 
         if (!instanceMethods.isEmpty()) {
-            Constructor&lt;?&gt; ctor = pickConstructor(sut);
+            testClass.addField(FieldSpec.builder(ClassName.get(sut), &quot;sut&quot;, Modifier.PRIVATE).build());
+            testClass.addMethod(setUpMethod(sut));
+            Set&lt;String&gt; usedNames = new HashSet&lt;&gt;();
             for (Method m : instanceMethods) {
-                testClass.addMethod(instanceTest(sut, ctor, m));
+                testClass.addMethod(instanceTest(m, usedNames));
             }
         }
         if (!staticMethods.isEmpty()) {
+            Set&lt;String&gt; usedNames = instanceMethods.stream()
+                    .map(TestSkeletonGenerator::safeName)
+                    .collect(java.util.stream.Collectors.toCollection(HashSet::new));
             for (Method m : staticMethods) {
-                testClass.addMethod(staticTest(sut, m));
+                testClass.addMethod(staticTest(sut, m, staticPrefix, usedNames));
             }
         }
         if (instanceMethods.isEmpty() &amp;&amp; staticMethods.isEmpty()) {
             System.out.println(&quot;WARN no public methods: &quot; + sut.getName());
-            testClass.addJavadoc(&quot;No public methods discovered.\n&quot;);
+            testClass.addJavadoc(&quot;No public methods discovered.&#92;n&quot;);
         }
 
         JavaFile.builder(testPackage, testClass.build())
@@ -513,27 +520,20 @@ public final class TestSkeletonGenerator {
                 + &quot; (instance=&quot; + instanceMethods.size() + &quot;, static=&quot; + staticMethods.size() + &quot;)&quot;);
     }
 
-    private static MethodSpec instanceTest(Class&lt;?&gt; sut, Constructor&lt;?&gt; ctor, Method method) {
-        MethodSpec.Builder b = MethodSpec.methodBuilder(safeName(method))
+    private static MethodSpec setUpMethod(Class&lt;?&gt; sut) {
+        return MethodSpec.methodBuilder(&quot;setUp&quot;)
+                .addAnnotation(BEFORE_EACH)
+                .addModifiers(Modifier.PUBLIC)
+                .addStatement(&quot;sut = $T.create($T.class)&quot;, INSTANCIO, ClassName.get(sut))
+                .build();
+    }
+
+    private static MethodSpec instanceTest(Method method, Set&lt;String&gt; usedNames) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(safeName(method), usedNames))
                 .addModifiers(Modifier.PUBLIC)
                 .addAnnotation(TEST);
 
         List&lt;MockRef&gt; mocks = new ArrayList&lt;&gt;();
-        List&lt;String&gt; ctorArgNames = new ArrayList&lt;&gt;();
-        if (ctor != null) {
-            int i = 0;
-            for (Parameter p : ctor.getParameters()) {
-                String var = &quot;c&quot; + (i++) + &quot;_&quot; + simpleParamName(p);
-                b.addCode(arrangeLine(p.getType(), var, mocks));
-                ctorArgNames.add(var);
-            }
-            b.addStatement(&quot;$T sut = new $T($L)&quot;,
-                    ClassName.get(sut), ClassName.get(sut), String.join(&quot;, &quot;, ctorArgNames));
-        } else {
-            b.addStatement(&quot;$T sut = $T.create($T.class)&quot;,
-                    ClassName.get(sut), INSTANCIO, ClassName.get(sut));
-        }
-
         List&lt;String&gt; methodArgNames = new ArrayList&lt;&gt;();
         int j = 0;
         for (Parameter p : method.getParameters()) {
@@ -561,8 +561,9 @@ public final class TestSkeletonGenerator {
         return b.build();
     }
 
-    private static MethodSpec staticTest(Class&lt;?&gt; sut, Method method) {
-        MethodSpec.Builder b = MethodSpec.methodBuilder(&quot;static_&quot; + safeName(method))
+    private static MethodSpec staticTest(Class&lt;?&gt; sut, Method method, boolean prefix, Set&lt;String&gt; usedNames) {
+        String base = prefix ? &quot;static_&quot; + safeName(method) : safeName(method);
+        MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(base, usedNames))
                 .addModifiers(Modifier.PUBLIC)
                 .addAnnotation(TEST);
 
@@ -594,42 +595,40 @@ public final class TestSkeletonGenerator {
         return b.build();
     }
 
-    /** JavaPoet type for any Class — arrays need TypeName, not ClassName. */
+    /** No declared instance methods but has static methods — utility/facade shape. */
+    private static boolean isStaticOnlyClass(Class&lt;?&gt; sut) {
+        return filterInstance(sut.getDeclaredMethods()).isEmpty()
+                &amp;&amp; !filterStatic(sut.getDeclaredMethods()).isEmpty();
+    }
+
     private static TypeName javaPoetType(Class&lt;?&gt; type) {
         return TypeName.get(type);
     }
 
-    /** Interface → mock (tracked for stubbing); concrete → Instancio (with a few smoke-safe defaults). */
     private static CodeBlock arrangeLine(Class&lt;?&gt; type, String varName, List&lt;MockRef&gt; mocks) {
         if (type.isInterface()) {
             mocks.add(new MockRef(type, varName));
-            return CodeBlock.of(&quot;$T $L = $T.mock($T.class);\n&quot;,
+            return CodeBlock.of(&quot;$T $L = $T.mock($T.class);&#92;n&quot;,
                     ClassName.get(type), varName, MOCKITO, ClassName.get(type));
         }
         if (type == Class.class) {
-            // Instancio cannot create java.lang.Class — use a stable literal for smoke
-            return CodeBlock.of(&quot;$T&lt;?&gt; $L = $T.class;\n&quot;,
+            return CodeBlock.of(&quot;$T&lt;?&gt; $L = $T.class;&#92;n&quot;,
                     ClassName.get(Class.class), varName, ClassName.get(String.class));
         }
         if (type == java.math.BigDecimal.class) {
-            // Random BigDecimal often trips domain guards (e.g. minimum checks)
-            return CodeBlock.of(&quot;$T $L = $T.ZERO;\n&quot;,
+            return CodeBlock.of(&quot;$T $L = $T.ZERO;&#92;n&quot;,
                     ClassName.get(java.math.BigDecimal.class), varName,
                     ClassName.get(java.math.BigDecimal.class));
         }
         if (type.isPrimitive()) {
             Class&lt;?&gt; boxed = box(type);
-            return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;,
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);&#92;n&quot;,
                     ClassName.get(boxed), varName, INSTANCIO, ClassName.get(boxed));
         }
         TypeName tn = javaPoetType(type);
-        return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;, tn, varName, INSTANCIO, tn);
+        return CodeBlock.of(&quot;$T $L = $T.create($T.class);&#92;n&quot;, tn, varName, INSTANCIO, tn);
     }
 
-    /**
-     * Minimal stubs: every public method on the mock interface gets a dumb return
-     * so smoke act does not NPE. Duo replaces with scenario stubs later.
-     */
     private static CodeBlock minimalStubs(MockRef mock) {
         CodeBlock.Builder stubs = CodeBlock.builder();
         for (Method m : mock.type.getMethods()) {
@@ -669,33 +668,19 @@ public final class TestSkeletonGenerator {
 
     private static String primitiveDefaultExpr(Class&lt;?&gt; prim) {
         if (prim == boolean.class) return &quot;false&quot;;
-        if (prim == char.class) return &quot;&#x27;\\0&#x27;&quot;;
+        if (prim == char.class) return &quot;&#x27;&#92;&#92;0&#x27;&quot;;
         return &quot;0&quot;;
     }
 
-    private static Constructor&lt;?&gt; pickConstructor(Class&lt;?&gt; sut) {
-        return Arrays.stream(sut.getDeclaredConstructors())
-                .filter(c -&gt; java.lang.reflect.Modifier.isPublic(c.getModifiers()))
-                .max(Comparator.comparingInt(Constructor::getParameterCount))
-                .orElse(null);
-    }
-
-    /**
-     * SUT contract instance methods:
-     * 1) declared on this class
-     * 2) if empty/thin → interfaces this class implements + immediate parent (not Object / not whole hierarchy)
-     */
     private static List&lt;Method&gt; contractInstanceMethods(Class&lt;?&gt; sut) {
         List&lt;Method&gt; declared = filterInstance(sut.getDeclaredMethods());
         if (!isThin(declared)) {
             return dedupe(declared);
         }
         LinkedHashSet&lt;Method&gt; contract = new LinkedHashSet&lt;&gt;(declared);
-        // interfaces this class implements (direct + inherited interfaces on this type)
         for (Class&lt;?&gt; iface : allInterfaces(sut)) {
             contract.addAll(filterInstance(iface.getMethods()));
         }
-        // overrides / parent contract: only immediate superclass methods when thin
         Class&lt;?&gt; parent = sut.getSuperclass();
         if (parent != null &amp;&amp; parent != Object.class) {
             contract.addAll(filterInstance(parent.getDeclaredMethods()));
@@ -708,7 +693,6 @@ public final class TestSkeletonGenerator {
         if (!declared.isEmpty()) {
             return dedupe(declared);
         }
-        // thin static: interface static methods only (rare) + immediate parent static
         LinkedHashSet&lt;Method&gt; contract = new LinkedHashSet&lt;&gt;();
         for (Class&lt;?&gt; iface : allInterfaces(sut)) {
             contract.addAll(filterStatic(iface.getMethods()));
@@ -720,7 +704,6 @@ public final class TestSkeletonGenerator {
         return dedupe(new ArrayList&lt;&gt;(contract));
     }
 
-    /** Thin = no methods, or only no-arg getters / isXxx (bean accessors). */
     private static boolean isThin(List&lt;Method&gt; declared) {
         if (declared.isEmpty()) {
             return true;
@@ -817,6 +800,15 @@ public final class TestSkeletonGenerator {
             return base;
         }
         return base + &quot;_&quot; + m.getParameterCount() + &quot;args&quot;;
+    }
+
+    private static String uniqueName(String base, Set&lt;String&gt; usedNames) {
+        String name = base;
+        int i = 2;
+        while (!usedNames.add(name)) {
+            name = base + &quot;_&quot; + i++;
+        }
+        return name;
     }
 
     private static String simpleParamName(Parameter p) {
