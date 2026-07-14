@@ -409,9 +409,8 @@ div.WordSection1
 <p class=MsoNormal>&nbsp;</p>
 
 
-<p class=MsoNormal><b>TestSkeletonGenerator (JavaPoet batch skeleton — Cursor demo reference)</b></p>
-<p class=MsoNormal>Source of truth also lives under Cursor workspace <code>experiments/instancio-pipeline-demo/.../TestSkeletonGenerator.java</code>. Input list: <code>src/test/resources/testgen/classes.txt</code>. Run with working directory = module root. Contract: Instancio + mock + minimal stub + act + smoke assert; instance and static; thin subclass pulls interface + immediate parent methods only.</p>
-<pre style='font-family:Consolas,monospace;font-size:9.0pt;white-space:pre-wrap;word-wrap:break-word;background:#F5F5F5;border:solid #A3A3A3 1.0pt;padding:8.0pt;'>package demo.walkthrough.testgen;
+<p class=MsoNormal><b>TestSkeletonGenerator (JavaPoet batch skeleton — Cursor demo reference)</b></p><p class=MsoNormal>Source of truth also lives under Cursor workspace <code>experiments/instancio-pipeline-demo/.../TestSkeletonGenerator.java</code>. Input list: <code>src/test/resources/testgen/classes.txt</code>. Run with working directory = module root. Contract: Instancio + mock + minimal stub + act + smoke assert; instance and static; thin subclass pulls interface + immediate parent methods only; array params/returns via TypeName.</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package demo.walkthrough.testgen;
 
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.CodeBlock;
@@ -472,7 +471,7 @@ public final class TestSkeletonGenerator {
         String testPackage = sut.getPackageName();
         String testSimpleName = sut.getSimpleName() + &quot;SkeletonTest&quot;;
         Path target = testSourceRoot
-                .resolve(testPackage.replace(&#39;.&#39;, &#39;/&#39;))
+                .resolve(testPackage.replace(&#x27;.&#x27;, &#x27;/&#x27;))
                 .resolve(testSimpleName + &quot;.java&quot;);
         if (Files.exists(target)) {
             System.out.println(&quot;SKIP (exists): &quot; + target);
@@ -485,8 +484,10 @@ public final class TestSkeletonGenerator {
         TypeSpec.Builder testClass = TypeSpec.classBuilder(testSimpleName)
                 .addModifiers(Modifier.PUBLIC)
                 .addJavadoc(
-                        &quot;AUTO-GENERATED arrange skeleton for $L.\n&quot;
-                                + &quot;Locals per test; smoke asserts; Duo fills real asserts later.\n&quot;,
+                        &quot;AUTO-GENERATED arrange skeleton for $L.
+&quot;
+                                + &quot;Locals per test; smoke asserts; Duo fills real asserts later.
+&quot;,
                         sut.getName());
 
         if (!instanceMethods.isEmpty()) {
@@ -502,7 +503,8 @@ public final class TestSkeletonGenerator {
         }
         if (instanceMethods.isEmpty() &amp;&amp; staticMethods.isEmpty()) {
             System.out.println(&quot;WARN no public methods: &quot; + sut.getName());
-            testClass.addJavadoc(&quot;No public methods discovered.\n&quot;);
+            testClass.addJavadoc(&quot;No public methods discovered.
+&quot;);
         }
 
         JavaFile.builder(testPackage, testClass.build())
@@ -595,31 +597,41 @@ public final class TestSkeletonGenerator {
         return b.build();
     }
 
+    /** JavaPoet type for any Class — arrays need TypeName, not ClassName. */
+    private static TypeName javaPoetType(Class&lt;?&gt; type) {
+        return TypeName.get(type);
+    }
+
     /** Interface → mock (tracked for stubbing); concrete → Instancio (with a few smoke-safe defaults). */
     private static CodeBlock arrangeLine(Class&lt;?&gt; type, String varName, List&lt;MockRef&gt; mocks) {
         if (type.isInterface()) {
             mocks.add(new MockRef(type, varName));
-            return CodeBlock.of(&quot;$T $L = $T.mock($T.class);\n&quot;,
+            return CodeBlock.of(&quot;$T $L = $T.mock($T.class);
+&quot;,
                     ClassName.get(type), varName, MOCKITO, ClassName.get(type));
         }
         if (type == Class.class) {
             // Instancio cannot create java.lang.Class — use a stable literal for smoke
-            return CodeBlock.of(&quot;$T&lt;?&gt; $L = $T.class;\n&quot;,
+            return CodeBlock.of(&quot;$T&lt;?&gt; $L = $T.class;
+&quot;,
                     ClassName.get(Class.class), varName, ClassName.get(String.class));
         }
         if (type == java.math.BigDecimal.class) {
             // Random BigDecimal often trips domain guards (e.g. minimum checks)
-            return CodeBlock.of(&quot;$T $L = $T.ZERO;\n&quot;,
+            return CodeBlock.of(&quot;$T $L = $T.ZERO;
+&quot;,
                     ClassName.get(java.math.BigDecimal.class), varName,
                     ClassName.get(java.math.BigDecimal.class));
         }
         if (type.isPrimitive()) {
             Class&lt;?&gt; boxed = box(type);
-            return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;,
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);
+&quot;,
                     ClassName.get(boxed), varName, INSTANCIO, ClassName.get(boxed));
         }
-        return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;,
-                ClassName.get(type), varName, INSTANCIO, ClassName.get(type));
+        TypeName tn = javaPoetType(type);
+        return CodeBlock.of(&quot;$T $L = $T.create($T.class);
+&quot;, tn, varName, INSTANCIO, tn);
     }
 
     /**
@@ -641,8 +653,9 @@ public final class TestSkeletonGenerator {
                 stubs.addStatement(&quot;$T.when($L.$L($L)).thenReturn($L)&quot;,
                         MOCKITO, mock.varName, m.getName(), anyArgs, primitiveDefaultExpr(ret));
             } else {
+                TypeName retTn = javaPoetType(ret);
                 stubs.addStatement(&quot;$T.when($L.$L($L)).thenReturn($T.create($T.class))&quot;,
-                        MOCKITO, mock.varName, m.getName(), anyArgs, INSTANCIO, ClassName.get(ret));
+                        MOCKITO, mock.varName, m.getName(), anyArgs, INSTANCIO, retTn);
             }
         }
         return stubs.build();
@@ -664,7 +677,7 @@ public final class TestSkeletonGenerator {
 
     private static String primitiveDefaultExpr(Class&lt;?&gt; prim) {
         if (prim == boolean.class) return &quot;false&quot;;
-        if (prim == char.class) return &quot;&#39;\\0&#39;&quot;;
+        if (prim == char.class) return &quot;&#x27;\0&#x27;&quot;;
         return &quot;0&quot;;
     }
 
