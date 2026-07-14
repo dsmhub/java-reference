@@ -1,4 +1,4 @@
-﻿<html>
+<html>
 
 <head>
 <meta http-equiv=Content-Type content="text/html; charset=unicode">
@@ -409,8 +409,720 @@ div.WordSection1
 <p class=MsoNormal>&nbsp;</p>
 
 
-<p class=MsoNormal><b>TestSkeletonGenerator (JavaPoet batch skeleton — Cursor demo reference)</b></p><p class=MsoNormal>Source of truth also lives under Cursor workspace <code>experiments/instancio-pipeline-demo/.../TestSkeletonGenerator.java</code>. Input list: <code>src/test/resources/testgen/classes.txt</code>. Run with working directory = module root. Contract: Instancio + mock + minimal stub + act + smoke assert; instance and static; thin subclass pulls interface + immediate parent methods only; array params/returns via TypeName; output class is ClassNameTest (not SkeletonTest); Instancio SUT via @BeforeEach.</p>
-<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package demo.walkthrough.testgen;
+<p class=MsoNormal><b>testgenlite v2 (drop-in)</b></p>
+<p class=MsoNormal>Source: Cursor <code>tools/testgenlite/v2/testgen</code>. Drop folder into SUT module root as <code>testgen/</code>. Mark as Test Sources; run <code>com.testgen.Runner</code> with WD = module root (scan / inject / generate; edit <code>classes.txt</code> for FQCNs).</p>
+<p class=MsoNormal><b>LLM prompt (arrange upgrade — lab-control first-shot)</b></p>
+<p class=MsoNormal>Most successful first-shot shape from java-jwt-zero lab control (gemini 3/3 on the simple panel when the API was up). Paste into Duo/browser <b>after</b> scan+inject+generate. Second shot: prepend compiler/test errors under the same rules (max 2 shots).</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;"># Duo-style arrange upgrade (batch)
+
+Upgrade the auto-generated JUnit 5 smoke skeleton into meaningful unit tests.
+
+## Rules
+- Edit ONLY the test class. Do not change production SUT.
+- Use ONLY types/methods in the SUT (+ any types it clearly uses). No invented APIs.
+- Interface collaborators: Mockito.mock + stub hop-1 calls shown in // BEGIN testgen-dependencies.
+- Prefer Instancio.of(SUT).set(...) / @BeforeEach pattern from the scaffold.
+- Replace smoke asserts with behaviour asserts grounded in source.
+- Unchecked exceptions in source: use assertThrows where appropriate.
+- Keep the test class name ending in ArrangeTest (or your generate suffix).
+- The public class name MUST match the filename.
+- Do NOT invent helper/stub production classes.
+- Output ONE complete Java source file only — no markdown fences, no commentary.
+
+## Dirty SUT (includes testgen-dependencies graph if present)
+
+```java
+{{paste production class source, including // BEGIN testgen-dependencies … // END block}}
+```
+
+## Current scaffold
+
+```java
+{{paste the generated *Test / *ArrangeTest skeleton}}
+```
+</pre>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;"># Fix (shot 2)
+
+Fix the test class. Same rules as before. Keep class name matching the file.
+
+## Compiler / test errors
+
+{{paste compile or test failure text}}
+
+## Current test source
+
+```java
+{{paste current test file}}
+```
+</pre>
+<p class=MsoNormal><b>README.md</b></p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;"># testgen (drop-in)
+
+Copy this folder into the **SUT module root** as `testgen/`. No foreign classpath — tools load SUT types via the module’s own test classpath (`Class.forName`).
+
+## Setup
+
+1. Copy this folder to `&lt;module-root&gt;/testgen/`
+2. In IntelliJ: mark `testgen/` as **Test Sources Root**
+3. Set Run configuration **Working directory** to the **module root** (parent of `testgen/`)
+4. Ensure the module test classpath has: **javapoet**, **javaparser**, **instancio**, **mockito**, **junit** (Jupiter)
+5. Edit `testgen/classes.txt` (one FQCN per line; `#` comments OK)
+6. Run `com.testgen.Runner`
+
+Comment out `scan` / `inject` / `generate` in `Runner.main` to skip a step. Set `Config.STRIP = true` and run only inject to remove markers.
+
+## I/O
+
+| Item | Path |
+|------|------|
+| Classes list | `MODULE/testgen/classes.txt` |
+| Dependency graphs | `MODULE/testgen/reports/{Fqcn}.md` |
+| Main sources (inject) | `MODULE/src/main/java` (override `Config.MAIN_SOURCES`) |
+| Test skeletons | `MODULE/src/test/java` (override `Config.TEST_SOURCES`) |
+
+`MODULE` = process working directory (must be the SUT module root).
+
+| Step | Effect |
+|------|--------|
+| **scan** | Writes graphs under `testgen/reports/` |
+| **inject** | Writes `// BEGIN testgen-dependencies` … blocks into production sources |
+| **generate** | Writes `*{TEST_NAME_SUFFIX}` skeletons under test sources (skips if file exists) |
+
+## Notes
+
+- Generated skeletons are a starting point; they may need fixes before they compile/pass.
+- Do not keep a Gradle wrapper inside this drop-in folder — dependencies come from the host module.
+</pre>
+<p class=MsoNormal><b>com/config/Config.java</b></p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package com.config;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+/**
+ * Drop-in contract: Run working directory = SUT module root.
+ * This folder lives at {@code MODULE/testgen/}.
+ */
+public final class Config {
+
+    /** SUT module root = process working directory. */
+    public static final Path MODULE = Path.of(&quot;&quot;).toAbsolutePath().normalize();
+
+    /**
+     * Production source root.
+     * null → {@code MODULE/src/main/java}
+     */
+    public static final Path MAIN_SOURCES = null;
+
+    /**
+     * Test source root (skeletons written here).
+     * null → {@code MODULE/src/test/java}
+     */
+    public static final Path TEST_SOURCES = null;
+
+    public static final String TEST_NAME_SUFFIX = &quot;Test&quot;;
+
+    /**
+     * {@code true}: inject step removes dependency-graph markers from source (no inject).
+     * {@code false}: inject step writes dependency-graph markers into source.
+     */
+    public static final boolean STRIP = false;
+
+    private Config() {}
+
+    /** {@code MODULE/testgen/classes.txt} */
+    public static Path classesList() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;classes.txt&quot;);
+    }
+
+    /** {@code MODULE/testgen/reports} */
+    public static Path reportsDir() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;reports&quot;);
+    }
+
+    public static Path mainSourceRoot() {
+        return MAIN_SOURCES != null
+                ? MAIN_SOURCES.toAbsolutePath().normalize()
+                : MODULE.resolve(&quot;src&quot;).resolve(&quot;main&quot;).resolve(&quot;java&quot;);
+    }
+
+    public static Path testSourceRoot() {
+        return TEST_SOURCES != null
+                ? TEST_SOURCES.toAbsolutePath().normalize()
+                : MODULE.resolve(&quot;src&quot;).resolve(&quot;test&quot;).resolve(&quot;java&quot;);
+    }
+
+    public static List&lt;String&gt; readClasses() throws Exception {
+        Path list = classesList();
+        if (!Files.isRegularFile(list)) {
+            throw new IllegalStateException(&quot;classes list not found: &quot; + list);
+        }
+        return Files.readAllLines(list).stream()
+                .map(String::trim)
+                .filter(line -&gt; !line.isEmpty() &amp;&amp; !line.startsWith(&quot;#&quot;))
+                .toList();
+    }
+}
+</pre>
+<p class=MsoNormal><b>com/testgen/Runner.java</b></p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package com.testgen;
+
+import com.config.Config;
+
+/**
+ * IntelliJ entry point. Mark {@code testgen/} as Test Sources, set Run WD to the
+ * SUT module root, then Run. Comment out any call in {@link #main} to skip a step.
+ */
+public final class Runner {
+
+    private Runner() {}
+
+    public static void main(String[] args) throws Exception {
+        // Comment out any call you do not want to run this time.
+        scan();
+        inject();
+        generate();
+    }
+
+    static void scan() throws Exception {
+        DepGraphScanner.run();
+    }
+
+    static void inject() throws Exception {
+        DepGraphInjector.run(Config.STRIP);
+    }
+
+    static void generate() throws Exception {
+        TestSkeletonGenerator.run();
+    }
+}
+</pre>
+<p class=MsoNormal><b>com/testgen/DepGraphScanner.java</b></p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package com.testgen;
+
+import com.config.Config;
+
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
+import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
+
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Parameter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/**
+ * Step 1: scan SUTs → write per-class dependency graphs (no source injection).
+ *
+ * Output: {@code MODULE/testgen/reports/{Fqcn}.md}
+ */
+public final class DepGraphScanner {
+
+    /** Cap call/new sites kept per method for LLM-sized comments. */
+    static final int MAX_USES_PER_METHOD = 20;
+
+    private DepGraphScanner() {}
+
+    public static void run() throws Exception {
+        Path outDir = Config.reportsDir();
+        Files.createDirectories(outDir);
+        List&lt;String&gt; classes = Config.readClasses();
+        Path mainSourceRoot = Config.mainSourceRoot();
+
+        int wrote = 0;
+        for (String fqcn : classes) {
+            Class&lt;?&gt; sut = Class.forName(fqcn);
+            String markdown = scan(sut, mainSourceRoot);
+            Path out = outDir.resolve(fqcn + &quot;.md&quot;);
+            Files.writeString(out, markdown);
+            System.out.println(&quot;Wrote &quot; + out);
+            wrote++;
+        }
+        System.out.println(&quot;Done. &quot; + wrote + &quot; graph(s) in &quot; + outDir.toAbsolutePath());
+    }
+
+    static String scan(Class&lt;?&gt; sut, Path mainSourceRoot) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append(&quot;# testgen-dependencies&#92;n&quot;);
+        sb.append(&quot;sut: &quot;).append(sut.getName()).append(&#x27;&#92;n&#x27;);
+        sb.append(&quot;hop: 1&#92;n&quot;);
+        sb.append(&quot;staticOnly: &quot;).append(isStaticOnly(sut)).append(&#x27;&#92;n&#x27;);
+        sb.append(&#x27;&#92;n&#x27;);
+
+        sb.append(&quot;## fields&#92;n&quot;);
+        for (Field f : instanceAndStaticFields(sut)) {
+            boolean iface = f.getType().isInterface();
+            String kind = Modifier.isStatic(f.getModifiers()) ? &quot;static&quot; : &quot;instance&quot;;
+            String tip = iface ? &quot;iface → mock&quot; : &quot;concrete → Instancio/null-risk&quot;;
+            sb.append(&quot;- &quot;).append(f.getName()).append(&quot;: &quot;).append(typeLabel(f.getType()))
+                    .append(&quot;  [&quot;).append(kind).append(&quot;; &quot;).append(tip).append(&quot;]&#92;n&quot;);
+        }
+        if (instanceAndStaticFields(sut).isEmpty()) {
+            sb.append(&quot;- (none)&#92;n&quot;);
+        }
+        sb.append(&#x27;&#92;n&#x27;);
+
+        sb.append(&quot;## constructors&#92;n&quot;);
+        Constructor&lt;?&gt;[] ctors = sut.getDeclaredConstructors();
+        Arrays.sort(ctors, Comparator.comparingInt((Constructor&lt;?&gt; c) -&gt; c.getParameterCount()).reversed());
+        if (ctors.length == 0) {
+            sb.append(&quot;- (none)&#92;n&quot;);
+        } else {
+            for (Constructor&lt;?&gt; c : ctors) {
+                if (!Modifier.isPublic(c.getModifiers()) &amp;&amp; !Modifier.isProtected(c.getModifiers())) {
+                    continue;
+                }
+                sb.append(&quot;- &quot;).append(ctorSig(c)).append(&#x27;&#92;n&#x27;);
+            }
+        }
+        sb.append(&#x27;&#92;n&#x27;);
+
+        sb.append(&quot;## methods&#92;n&quot;);
+        Optional&lt;CompilationUnit&gt; cu = parseSource(sut, mainSourceRoot);
+        List&lt;Method&gt; methods = publicMethods(sut);
+        if (methods.isEmpty()) {
+            sb.append(&quot;- (none)&#92;n&quot;);
+        }
+        for (Method m : methods) {
+            sb.append(&quot;### &quot;).append(methodKey(m)).append(&#x27;&#92;n&#x27;);
+            sb.append(&quot;- static: &quot;).append(Modifier.isStatic(m.getModifiers())).append(&#x27;&#92;n&#x27;);
+            sb.append(&quot;- returns: &quot;).append(typeLabel(m.getReturnType())).append(&#x27;&#92;n&#x27;);
+            Class&lt;?&gt;[] checked = m.getExceptionTypes();
+            if (checked.length &gt; 0) {
+                sb.append(&quot;- throwsChecked: &quot;)
+                        .append(Arrays.stream(checked).map(DepGraphScanner::typeLabel)
+                                .collect(Collectors.joining(&quot;, &quot;)))
+                        .append(&#x27;&#92;n&#x27;);
+            } else {
+                sb.append(&quot;- throwsChecked: (none)&#92;n&quot;);
+            }
+            sb.append(&quot;- params:&#92;n&quot;);
+            if (m.getParameterCount() == 0) {
+                sb.append(&quot;  - (none)&#92;n&quot;);
+            } else {
+                for (Parameter p : m.getParameters()) {
+                    boolean iface = p.getType().isInterface();
+                    sb.append(&quot;  - &quot;).append(p.getName()).append(&quot;: &quot;).append(typeLabel(p.getType()))
+                            .append(iface ? &quot;  [iface → mock]&#92;n&quot; : &quot;&#92;n&quot;);
+                }
+            }
+
+            List&lt;String&gt; uses = cu.map(unit -&gt; hop1Uses(unit, sut.getSimpleName(), m))
+                    .orElse(List.of(&quot;(source not found — inventory only)&quot;));
+            sb.append(&quot;- uses (hop 1):&#92;n&quot;);
+            if (uses.isEmpty()) {
+                sb.append(&quot;  - (none found)&#92;n&quot;);
+            } else {
+                for (String u : uses) {
+                    sb.append(&quot;  - &quot;).append(u).append(&#x27;&#92;n&#x27;);
+                }
+            }
+            sb.append(&#x27;&#92;n&#x27;);
+        }
+
+        sb.append(&quot;## notes&#92;n&quot;);
+        sb.append(&quot;- hop 1 = direct calls / new in method body (AST); not transitive.&#92;n&quot;);
+        sb.append(&quot;- Logger / static init often ignored by skeleton; stub or exclude if NPE.&#92;n&quot;);
+        sb.append(&quot;- Unchecked exceptions (NPE, IAE) are not in throwsChecked — Duo/error loop.&#92;n&quot;);
+        return sb.toString();
+    }
+
+    private static Optional&lt;CompilationUnit&gt; parseSource(Class&lt;?&gt; sut, Path mainSourceRoot) {
+        Path src = mainSourceRoot
+                .resolve(sut.getPackageName().replace(&#x27;.&#x27;, &#x27;/&#x27;))
+                .resolve(sut.getSimpleName() + &quot;.java&quot;);
+        if (!Files.isRegularFile(src)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(StaticJavaParser.parse(src));
+        } catch (Exception e) {
+            System.err.println(&quot;WARN parse failed &quot; + src + &quot;: &quot; + e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private static List&lt;String&gt; hop1Uses(CompilationUnit cu, String simpleName, Method method) {
+        Optional&lt;MethodDeclaration&gt; md = findMethod(cu, simpleName, method);
+        if (md.isEmpty()) {
+            return List.of(&quot;(method body not located in source)&quot;);
+        }
+        LinkedHashSet&lt;String&gt; uses = new LinkedHashSet&lt;&gt;();
+        md.get().accept(new VoidVisitorAdapter&lt;Void&gt;() {
+            @Override
+            public void visit(MethodCallExpr n, Void arg) {
+                super.visit(n, arg);
+                String name = n.getNameAsString();
+                if (isNoise(name)) {
+                    return;
+                }
+                String scope = n.getScope().map(Object::toString).orElse(&quot;this&quot;);
+                if (isNoiseScope(scope)) {
+                    return;
+                }
+                uses.add(scope + &quot;.&quot; + name + &quot;(&quot; + n.getArguments().size() + &quot;)&quot;);
+            }
+
+            @Override
+            public void visit(ObjectCreationExpr n, Void arg) {
+                super.visit(n, arg);
+                uses.add(&quot;new &quot; + n.getType().asString() + &quot;(&quot; + n.getArguments().size() + &quot;)&quot;);
+            }
+        }, null);
+
+        List&lt;String&gt; out = new ArrayList&lt;&gt;(uses);
+        if (out.size() &gt; MAX_USES_PER_METHOD) {
+            return new ArrayList&lt;&gt;(out.subList(0, MAX_USES_PER_METHOD));
+        }
+        return out;
+    }
+
+    private static Optional&lt;MethodDeclaration&gt; findMethod(CompilationUnit cu, String simpleName, Method method) {
+        Optional&lt;ClassOrInterfaceDeclaration&gt; type = cu.getClassByName(simpleName);
+        if (type.isEmpty()) {
+            return Optional.empty();
+        }
+        List&lt;MethodDeclaration&gt; candidates = type.get().getMethodsByName(method.getName());
+        for (MethodDeclaration md : candidates) {
+            if (md.getParameters().size() != method.getParameterCount()) {
+                continue;
+            }
+            if (Modifier.isStatic(method.getModifiers()) != md.isStatic()) {
+                continue;
+            }
+            return Optional.of(md);
+        }
+        return candidates.stream().findFirst();
+    }
+
+    private static boolean isNoise(String methodName) {
+        return Set.of(&quot;equals&quot;, &quot;hashCode&quot;, &quot;toString&quot;, &quot;getClass&quot;, &quot;valueOf&quot;,
+                &quot;requireNonNull&quot;, &quot;requireNonBlank&quot;).contains(methodName);
+    }
+
+    private static boolean isNoiseScope(String scope) {
+        return scope.startsWith(&quot;Objects&quot;)
+                || scope.startsWith(&quot;System&quot;)
+                || scope.startsWith(&quot;Ids&quot;)
+                || scope.equals(&quot;Math&quot;);
+    }
+
+    private static List&lt;Field&gt; instanceAndStaticFields(Class&lt;?&gt; sut) {
+        List&lt;Field&gt; out = new ArrayList&lt;&gt;();
+        Class&lt;?&gt; cur = sut;
+        while (cur != null &amp;&amp; cur != Object.class) {
+            for (Field f : cur.getDeclaredFields()) {
+                if (f.isSynthetic()) {
+                    continue;
+                }
+                out.add(f);
+            }
+            cur = cur.getSuperclass();
+        }
+        return out;
+    }
+
+    private static List&lt;Method&gt; publicMethods(Class&lt;?&gt; sut) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        for (Method m : sut.getDeclaredMethods()) {
+            if (!Modifier.isPublic(m.getModifiers()) || m.isSynthetic() || m.isBridge()) {
+                continue;
+            }
+            String n = m.getName();
+            if (n.equals(&quot;equals&quot;) || n.equals(&quot;hashCode&quot;) || n.equals(&quot;toString&quot;)) {
+                continue;
+            }
+            out.add(m);
+        }
+        if (filterInstance(sut.getDeclaredMethods()).isEmpty()
+                || onlyAccessors(filterInstance(sut.getDeclaredMethods()))) {
+            Class&lt;?&gt; parent = sut.getSuperclass();
+            if (parent != null &amp;&amp; parent != Object.class) {
+                for (Method m : parent.getDeclaredMethods()) {
+                    if (Modifier.isPublic(m.getModifiers()) &amp;&amp; !Modifier.isStatic(m.getModifiers())
+                            &amp;&amp; !m.isSynthetic() &amp;&amp; !m.isBridge()) {
+                        out.add(m);
+                    }
+                }
+            }
+        }
+        LinkedHashSet&lt;String&gt; seen = new LinkedHashSet&lt;&gt;();
+        List&lt;Method&gt; deduped = new ArrayList&lt;&gt;();
+        for (Method m : out) {
+            String key = methodKey(m);
+            if (seen.add(key)) {
+                deduped.add(m);
+            }
+        }
+        deduped.sort(Comparator.comparing(DepGraphScanner::methodKey));
+        return deduped;
+    }
+
+    private static List&lt;Method&gt; filterInstance(Method[] methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        for (Method m : methods) {
+            if (Modifier.isPublic(m.getModifiers()) &amp;&amp; !Modifier.isStatic(m.getModifiers())
+                    &amp;&amp; !m.isSynthetic() &amp;&amp; !m.isBridge()) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static boolean onlyAccessors(List&lt;Method&gt; methods) {
+        if (methods.isEmpty()) {
+            return true;
+        }
+        for (Method m : methods) {
+            if (m.getParameterCount() != 0 || m.getReturnType() == void.class) {
+                return false;
+            }
+            String n = m.getName();
+            if (!n.startsWith(&quot;get&quot;) &amp;&amp; !n.startsWith(&quot;is&quot;)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isStaticOnly(Class&lt;?&gt; sut) {
+        boolean anyInstance = false;
+        boolean anyStatic = false;
+        for (Method m : sut.getDeclaredMethods()) {
+            if (!Modifier.isPublic(m.getModifiers()) || m.isSynthetic() || m.isBridge()) {
+                continue;
+            }
+            if (Modifier.isStatic(m.getModifiers())) {
+                anyStatic = true;
+            } else {
+                anyInstance = true;
+            }
+        }
+        return !anyInstance &amp;&amp; anyStatic;
+    }
+
+    private static String methodKey(Method m) {
+        String params = Arrays.stream(m.getParameterTypes())
+                .map(DepGraphScanner::typeLabel)
+                .collect(Collectors.joining(&quot;, &quot;));
+        return m.getName() + &quot;(&quot; + params + &quot;)&quot;;
+    }
+
+    private static String ctorSig(Constructor&lt;?&gt; c) {
+        String params = Arrays.stream(c.getParameterTypes())
+                .map(DepGraphScanner::typeLabel)
+                .collect(Collectors.joining(&quot;, &quot;));
+        return c.getDeclaringClass().getSimpleName() + &quot;(&quot; + params + &quot;)&quot;;
+    }
+
+    private static String typeLabel(Class&lt;?&gt; type) {
+        if (type.isArray()) {
+            return typeLabel(type.getComponentType()) + &quot;[]&quot;;
+        }
+        return type.getName();
+    }
+}
+</pre>
+<p class=MsoNormal><b>com/testgen/DepGraphInjector.java</b></p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package com.testgen;
+
+import com.config.Config;
+
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.TypeDeclaration;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Step 2: inject per-SUT dependency graphs into source as line comments under the class brace.
+ *
+ * Markers (idempotent replace):
+ *   // BEGIN testgen-dependencies
+ *   ...
+ *   // END testgen-dependencies
+ *
+ * Also strips legacy // BEGIN testgen-deps … // END testgen-deps blocks.
+ */
+public final class DepGraphInjector {
+
+    static final String BEGIN = &quot;// BEGIN testgen-dependencies&quot;;
+    static final String END = &quot;// END testgen-dependencies&quot;;
+
+    /** Legacy short name — still stripped on inject/strip so older SUTs clean up. */
+    static final String LEGACY_BEGIN = &quot;// BEGIN testgen-deps&quot;;
+    static final String LEGACY_END = &quot;// END testgen-deps&quot;;
+
+    private static final Pattern MARKER_BLOCK = Pattern.compile(
+            &quot;(?m)^[ &#92;&#92;t]*&quot; + Pattern.quote(BEGIN) + &quot;[&#92;&#92;s&#92;&#92;S]*?&quot;
+                    + &quot;^[ &#92;&#92;t]*&quot; + Pattern.quote(END) + &quot;[ &#92;&#92;t]*&#92;&#92;R?&quot;);
+
+    private static final Pattern LEGACY_MARKER_BLOCK = Pattern.compile(
+            &quot;(?m)^[ &#92;&#92;t]*&quot; + Pattern.quote(LEGACY_BEGIN) + &quot;[&#92;&#92;s&#92;&#92;S]*?&quot;
+                    + &quot;^[ &#92;&#92;t]*&quot; + Pattern.quote(LEGACY_END) + &quot;[ &#92;&#92;t]*&#92;&#92;R?&quot;);
+
+    private DepGraphInjector() {}
+
+    public static void run(boolean strip) throws Exception {
+        List&lt;String&gt; classes = Config.readClasses();
+        Path mainSourceRoot = Config.mainSourceRoot();
+        Path dependenciesDir = Config.reportsDir();
+
+        int ok = 0;
+        for (String fqcn : classes) {
+            int lastDot = fqcn.lastIndexOf(&#x27;.&#x27;);
+            Path src = mainSourceRoot
+                    .resolve(fqcn.substring(0, lastDot).replace(&#x27;.&#x27;, &#x27;/&#x27;))
+                    .resolve(fqcn.substring(lastDot + 1) + &quot;.java&quot;);
+            if (!Files.isRegularFile(src)) {
+                System.err.println(&quot;SKIP missing source: &quot; + src);
+                continue;
+            }
+            if (strip) {
+                stripFile(src);
+                System.out.println(&quot;Stripped &quot; + src);
+            } else {
+                Path graph = dependenciesDir.resolve(fqcn + &quot;.md&quot;);
+                if (!Files.isRegularFile(graph)) {
+                    System.err.println(&quot;SKIP missing graph (run scan first): &quot; + graph);
+                    continue;
+                }
+                injectFile(src, fqcn, Files.readString(graph));
+                System.out.println(&quot;Injected &quot; + src);
+            }
+            ok++;
+        }
+        System.out.println((strip ? &quot;Strip&quot; : &quot;Inject&quot;) + &quot; done for &quot; + ok + &quot; file(s).&quot;);
+    }
+
+    static void injectFile(Path src, String fqcn, String markdown) throws Exception {
+        String text = Files.readString(src);
+        text = stripAllMarkers(text);
+        text = trimTrailingBlankLines(text);
+
+        String commentBlock = toCommentBlock(markdown);
+        String simpleName = fqcn.substring(fqcn.lastIndexOf(&#x27;.&#x27;) + 1);
+        String updated = insertAfterClassClosingBrace(text, simpleName, commentBlock);
+        Files.writeString(src, updated);
+    }
+
+    static void stripFile(Path src) throws Exception {
+        String text = Files.readString(src);
+        String stripped = stripAllMarkers(text);
+        stripped = trimTrailingBlankLines(stripped);
+        if (!stripped.endsWith(&quot;&#92;n&quot;)) {
+            stripped = stripped + &quot;&#92;n&quot;;
+        }
+        Files.writeString(src, stripped);
+    }
+
+    static String stripAllMarkers(String text) {
+        text = MARKER_BLOCK.matcher(text).replaceAll(&quot;&quot;);
+        text = LEGACY_MARKER_BLOCK.matcher(text).replaceAll(&quot;&quot;);
+        return text;
+    }
+
+    /** Each markdown line becomes a // comment line; wrapped by BEGIN/END markers. */
+    static String toCommentBlock(String markdown) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(BEGIN).append(&#x27;&#92;n&#x27;);
+        for (String line : markdown.replace(&quot;&#92;r&#92;n&quot;, &quot;&#92;n&quot;).replace(&#x27;&#92;r&#x27;, &#x27;&#92;n&#x27;).split(&quot;&#92;n&quot;, -1)) {
+            if (line.isEmpty()) {
+                sb.append(&quot;//&#92;n&quot;);
+            } else {
+                sb.append(&quot;// &quot;).append(line).append(&#x27;&#92;n&#x27;);
+            }
+        }
+        sb.append(END).append(&#x27;&#92;n&#x27;);
+        return sb.toString();
+    }
+
+    static String insertAfterClassClosingBrace(String source, String simpleName, String commentBlock)
+            throws Exception {
+        CompilationUnit cu = StaticJavaParser.parse(source);
+        ClassOrInterfaceDeclaration type = cu.getClassByName(simpleName)
+                .or(() -&gt; findType(cu, simpleName))
+                .orElseThrow(() -&gt; new IllegalStateException(&quot;Type not found: &quot; + simpleName));
+
+        int endLine = type.getEnd()
+                .orElseThrow(() -&gt; new IllegalStateException(&quot;No end position for &quot; + simpleName))
+                .line; // 1-based
+
+        List&lt;String&gt; lines = new ArrayList&lt;&gt;(List.of(source.replace(&quot;&#92;r&#92;n&quot;, &quot;&#92;n&quot;).split(&quot;&#92;n&quot;, -1)));
+        int insertAt = Math.min(endLine, lines.size());
+        List&lt;String&gt; commentLines = List.of(commentBlock.replace(&quot;&#92;r&#92;n&quot;, &quot;&#92;n&quot;).split(&quot;&#92;n&quot;, -1));
+        if (!commentLines.isEmpty() &amp;&amp; commentLines.get(commentLines.size() - 1).isEmpty()) {
+            commentLines = commentLines.subList(0, commentLines.size() - 1);
+        }
+
+        List&lt;String&gt; out = new ArrayList&lt;&gt;();
+        out.addAll(lines.subList(0, insertAt));
+        if (!out.isEmpty() &amp;&amp; !out.get(out.size() - 1).isBlank()) {
+            out.add(&quot;&quot;);
+        }
+        out.addAll(commentLines);
+        if (insertAt &lt; lines.size()) {
+            out.addAll(lines.subList(insertAt, lines.size()));
+        }
+        String joined = String.join(&quot;&#92;n&quot;, out);
+        if (!joined.endsWith(&quot;&#92;n&quot;)) {
+            joined = joined + &quot;&#92;n&quot;;
+        }
+        return joined;
+    }
+
+    private static java.util.Optional&lt;ClassOrInterfaceDeclaration&gt; findType(CompilationUnit cu, String simpleName) {
+        for (TypeDeclaration&lt;?&gt; t : cu.getTypes()) {
+            if (t instanceof ClassOrInterfaceDeclaration cid &amp;&amp; cid.getNameAsString().equals(simpleName)) {
+                return java.util.Optional.of(cid);
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
+    private static String trimTrailingBlankLines(String text) {
+        text = text.replace(&quot;&#92;r&#92;n&quot;, &quot;&#92;n&quot;).replace(&#x27;&#92;r&#x27;, &#x27;&#92;n&#x27;);
+        while (text.endsWith(&quot;&#92;n&#92;n&quot;)) {
+            text = text.substring(0, text.length() - 1);
+        }
+        Matcher leftover = MARKER_BLOCK.matcher(text);
+        if (leftover.find()) {
+            text = leftover.replaceAll(&quot;&quot;);
+        }
+        leftover = LEGACY_MARKER_BLOCK.matcher(text);
+        if (leftover.find()) {
+            text = leftover.replaceAll(&quot;&quot;);
+        }
+        return text;
+    }
+}
+</pre>
+<p class=MsoNormal><b>com/testgen/TestSkeletonGenerator.java</b></p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package com.testgen;
+
+import com.config.Config;
 
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.CodeBlock;
@@ -426,7 +1138,6 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -440,15 +1151,12 @@ import java.util.Set;
  * - Mockito.mock for interfaces; minimal stubbing for smoke act
  * - instance + static in same class; static-only SUTs get static tests only
  * - SUT contract methods: declared; if empty/thin → interfaces + immediate parent
- * - smoke assertNotNull / assertTrue
- * - skip if *Test already exists
+ * - mirrors declared checked exceptions on generated @Test methods
+ * - skip if *{suffix} already exists
  *
- * Run with working directory = module root. Input: src/test/resources/testgen/classes.txt
+ * Array TypeName via {@link TypeName#get(java.lang.reflect.Type)} (javaPoetType).
  */
 public final class TestSkeletonGenerator {
-
-    static final Path CLASS_LIST = Paths.get(&quot;src/test/resources/testgen/classes.txt&quot;);
-    static final Path TEST_SOURCE_ROOT = Paths.get(&quot;src/test/java&quot;);
 
     private static final ClassName INSTANCIO = ClassName.get(&quot;org.instancio&quot;, &quot;Instancio&quot;);
     private static final ClassName SELECT = ClassName.get(&quot;org.instancio&quot;, &quot;Select&quot;);
@@ -458,20 +1166,21 @@ public final class TestSkeletonGenerator {
     private static final ClassName BEFORE_EACH = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;BeforeEach&quot;);
     private static final ClassName ASSERTIONS = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Assertions&quot;);
 
-    public static void main(String[] args) throws Exception {
-        List&lt;String&gt; classes = Files.readAllLines(CLASS_LIST).stream()
-                .map(String::trim)
-                .filter(line -&gt; !line.isEmpty() &amp;&amp; !line.startsWith(&quot;#&quot;))
-                .toList();
+    private TestSkeletonGenerator() {}
+
+    public static void run() throws Exception {
+        Path testSourceRoot = Config.testSourceRoot();
+        String suffix = Config.TEST_NAME_SUFFIX;
+        List&lt;String&gt; classes = Config.readClasses();
 
         for (String fqcn : classes) {
-            writeSkeleton(Class.forName(fqcn), TEST_SOURCE_ROOT);
+            writeSkeleton(Class.forName(fqcn), testSourceRoot, suffix);
         }
     }
 
-    static void writeSkeleton(Class&lt;?&gt; sut, Path testSourceRoot) throws Exception {
+    static void writeSkeleton(Class&lt;?&gt; sut, Path testSourceRoot, String suffix) throws Exception {
         String testPackage = sut.getPackageName();
-        String testSimpleName = sut.getSimpleName() + &quot;Test&quot;;
+        String testSimpleName = sut.getSimpleName() + suffix;
         Path target = testSourceRoot
                 .resolve(testPackage.replace(&#x27;.&#x27;, &#x27;/&#x27;))
                 .resolve(testSimpleName + &quot;.java&quot;);
@@ -514,7 +1223,7 @@ public final class TestSkeletonGenerator {
         }
 
         JavaFile.builder(testPackage, testClass.build())
-                .addFileComment(&quot;AUTO-GENERATED by TestSkeletonGenerator&quot;)
+                .addFileComment(&quot;AUTO-GENERATED by testgen TestSkeletonGenerator&quot;)
                 .build()
                 .writeTo(testSourceRoot);
 
@@ -562,6 +1271,7 @@ public final class TestSkeletonGenerator {
         MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(safeName(method), usedNames))
                 .addModifiers(Modifier.PUBLIC)
                 .addAnnotation(TEST);
+        addDeclaredExceptions(method, b);
 
         List&lt;MockRef&gt; mocks = new ArrayList&lt;&gt;();
         List&lt;String&gt; methodArgNames = new ArrayList&lt;&gt;();
@@ -596,6 +1306,7 @@ public final class TestSkeletonGenerator {
         MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(base, usedNames))
                 .addModifiers(Modifier.PUBLIC)
                 .addAnnotation(TEST);
+        addDeclaredExceptions(method, b);
 
         List&lt;MockRef&gt; mocks = new ArrayList&lt;&gt;();
         List&lt;String&gt; methodArgNames = new ArrayList&lt;&gt;();
@@ -629,6 +1340,11 @@ public final class TestSkeletonGenerator {
         List&lt;Field&gt; fields = new ArrayList&lt;&gt;();
         Class&lt;?&gt; cur = sut;
         while (cur != null &amp;&amp; cur != Object.class) {
+            // Skip JDK frames (e.g. Throwable.suppressedExceptions) — not SUT collaborators.
+            if (isJdkType(cur)) {
+                cur = cur.getSuperclass();
+                continue;
+            }
             for (Field field : cur.getDeclaredFields()) {
                 if (!java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
                     fields.add(field);
@@ -639,12 +1355,23 @@ public final class TestSkeletonGenerator {
         return fields;
     }
 
-    /** No declared instance methods but has static methods — utility/facade shape. */
+    private static boolean isJdkType(Class&lt;?&gt; type) {
+        Package p = type.getPackage();
+        if (p == null) {
+            return false;
+        }
+        String n = p.getName();
+        return n.equals(&quot;java&quot;) || n.startsWith(&quot;java.&quot;)
+                || n.equals(&quot;javax&quot;) || n.startsWith(&quot;javax.&quot;)
+                || n.equals(&quot;jdk&quot;) || n.startsWith(&quot;jdk.&quot;);
+    }
+
     private static boolean isStaticOnlyClass(Class&lt;?&gt; sut) {
         return filterInstance(sut.getDeclaredMethods()).isEmpty()
                 &amp;&amp; !filterStatic(sut.getDeclaredMethods()).isEmpty();
     }
 
+    /** Prefer TypeName.get so arrays (and generics) render correctly. */
     private static TypeName javaPoetType(Class&lt;?&gt; type) {
         return TypeName.get(type);
     }
@@ -669,8 +1396,48 @@ public final class TestSkeletonGenerator {
             return CodeBlock.of(&quot;$T $L = $T.create($T.class);&#92;n&quot;,
                     ClassName.get(boxed), varName, INSTANCIO, ClassName.get(boxed));
         }
-        TypeName tn = javaPoetType(type);
-        return CodeBlock.of(&quot;$T $L = $T.create($T.class);&#92;n&quot;, tn, varName, INSTANCIO, tn);
+        return arrangeConcrete(type, varName, mocks);
+    }
+
+    private static CodeBlock arrangeConcrete(Class&lt;?&gt; type, String varName, List&lt;MockRef&gt; mocks) {
+        List&lt;Field&gt; ifaceFields = interfaceInstanceFields(type);
+        if (ifaceFields.isEmpty()) {
+            TypeName tn = javaPoetType(type);
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);&#92;n&quot;, tn, varName, INSTANCIO, tn);
+        }
+        CodeBlock.Builder block = CodeBlock.builder();
+        for (Field field : ifaceFields) {
+            String mockVar = varName + &quot;_&quot; + field.getName() + &quot;Mock&quot;;
+            mocks.add(new MockRef(field.getType(), mockVar));
+            block.addStatement(&quot;$T $L = $T.mock($T.class)&quot;,
+                    ClassName.get(field.getType()), mockVar, MOCKITO, ClassName.get(field.getType()));
+        }
+        CodeBlock.Builder chain = CodeBlock.builder().add(&quot;$T $L = $T.of($T.class)&quot;,
+                ClassName.get(type), varName, INSTANCIO, ClassName.get(type));
+        for (Field field : ifaceFields) {
+            String mockVar = varName + &quot;_&quot; + field.getName() + &quot;Mock&quot;;
+            chain.add(&quot;&#92;n    .set($T.field($T.class, $S), $L)&quot;,
+                    SELECT, ClassName.get(field.getDeclaringClass()), field.getName(), mockVar);
+        }
+        chain.add(&quot;&#92;n    .create();&#92;n&quot;);
+        block.add(chain.build());
+        return block.build();
+    }
+
+    private static List&lt;Field&gt; interfaceInstanceFields(Class&lt;?&gt; type) {
+        List&lt;Field&gt; out = new ArrayList&lt;&gt;();
+        for (Field field : instanceFields(type)) {
+            if (field.getType().isInterface()) {
+                out.add(field);
+            }
+        }
+        return out;
+    }
+
+    private static void addDeclaredExceptions(Method method, MethodSpec.Builder testMethod) {
+        for (Class&lt;?&gt; ex : method.getExceptionTypes()) {
+            testMethod.addException(TypeName.get(ex));
+        }
     }
 
     private static CodeBlock minimalStubs(MockRef mock) {
@@ -880,6 +1647,7 @@ public final class TestSkeletonGenerator {
     private record FieldMockRef(Class&lt;?&gt; type, String varName, Class&lt;?&gt; declaringClass, String fieldName) {}
 }
 </pre>
+
 </div>
 
 </body>
