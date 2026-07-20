@@ -431,6 +431,45 @@ div.WordSection1
 <p class=MsoNormal>Only the commits on feature (not main) that touched a given path — find exactly the commits to cherry-pick for that file:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git log --oneline main..feature -- path/to/file</pre>
 <p class=MsoNormal>Compare two similar commit series (e.g. before/after a rebase or a partial cherry-pick) to see what genuinely differs between them — for reconciling branches that have diverged:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git range-diff main feature~5 feature</pre>
 
+<p class=MsoNormal>&nbsp;</p>
+<p class=MsoNormal><b><span style='color:black'>Bringing a long-running feature branch into a restructured main (JDK 8&#8594;21 uplift)</span></b></p>
+<p class=MsoNormal><i>A branch cut from <code>main</code> and worked on for weeks (a JDK 8&#8594;21 uplift, new tests, bug fixes, Sonar quality fixes). Meanwhile <code>main</code> was restructured from root <code>test/&lt;packages&gt;</code> + <code>source/&lt;packages&gt;</code> to <code>source/main/java</code> + <code>source/test/java</code>. Merging the old branch directly makes Sonar treat every file as new code &#8212; including files that only moved. Instead, cut a fresh branch (e.g. <code>JDK21</code>) from the restructured <code>main</code> and bring changes across <b>by category</b>, not by replaying history.</i></p>
+<p class=MsoNormal><b>1. The four categories, and how each is handled</b></p>
+<p class=MsoNormal><b>Clean bug-fix commits (3&#8211;5):</b> cherry-pick by hash &#8212; preserved as discrete history. In IntelliJ, Git Log &#8594; filter to the source branch &#8594; multi-select &#8594; Cherry-Pick is nicer than the terminal here.</p>
+<p class=MsoNormal><b>Config (build.gradle, libraries.gradle, CI YAML):</b> take the final state, no replay.</p>
+<p class=MsoNormal><b style='color:#b00'>WARNING &#8212; build.gradle must be HAND-MERGED, not taken wholesale.</b> The old branch's <code>build.gradle</code> describes the <i>old</i> source-set layout; taking it wholesale overwrites the correct one and breaks the build. Take the toolchain / dependency changes; keep the new source sets.</p>
+<p class=MsoNormal><b>Sonar quality fixes:</b> write the branch version straight to the correct new location &#8212; this records as a <i>modification</i> to the existing file rather than an add-then-move, which matters for how Sonar classifies it:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git show &lt;branch&gt;:&lt;old-path&gt; &gt; &lt;new-path&gt;</pre>
+<p class=MsoNormal><b>Test coverage (the bulk, 50&#8211;70+ files across packages):</b> grab at the branch tip, move, single commit (section 4).</p>
+<p class=MsoNormal><b>2. Key insight</b></p>
+<p class=MsoNormal>Checking out from a <b>branch name</b> gives the file as of the branch tip &#8212; the final cumulative version with every earlier change already baked in. That sidesteps a file having been touched across many commits. Do NOT select from individual commits in the log.</p>
+<p class=MsoNormal><b>3. Execution order</b></p>
+<p class=MsoNormal>Config first (the build must be green before anything else is verifiable) &#8594; clean bug-fix commits &#8594; Sonar fixes &#8594; tests &#8594; verify &#8594; push once at the end.</p>
+<p class=MsoNormal><b>4. The test-file move &#8212; check for package collision first</b></p>
+<p class=MsoNormal><i>Both move commands below need <b>Git Bash</b>, not PowerShell/cmd.</i> First list the branch's old test tree and the new one:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git ls-tree -r --name-only &lt;branch&gt; test/ | head -30</pre>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">ls src/test/java</pre>
+<p class=MsoNormal><b>If NO overlap</b> &#8212; move wholesale; <code>git mv</code> fails loudly on a collision, which is what you want:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git checkout &lt;branch&gt; -- test/
+git mv test/* src/test/java/
+git commit -m &quot;move test coverage to new source set&quot;</pre>
+<p class=MsoNormal><b>If OVERLAP</b> &#8212; merge into existing packages, overwriting file-by-file (silent); only run when you are certain the branch version is wanted everywhere:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git archive &lt;branch&gt; test | tar -x --strip-components=1 -C src/test/java</pre>
+<p class=MsoNormal><b style='color:#b00'>Critical:</b> do NOT commit between the grab and the move. Git then records only the final state as one clean commit, instead of an add followed by a rename.</p>
+<p class=MsoNormal><b>5. Why not IntelliJ for the move</b></p>
+<p class=MsoNormal>Dragging packages in the Project view triggers Move refactoring, which may rewrite <code>package</code> declarations and imports. The package names are not changing &#8212; only the physical folder &#8212; so refactoring is the wrong tool and messy to unpick.</p>
+<p class=MsoNormal><b>6. Safety</b></p>
+<p class=MsoNormal>Commit after each category so every step has a rollback point; anything that goes wrong is then a clean reset. Run the checkout and inspect <code>git status</code> before moving anything.</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git status
+git reset --hard HEAD</pre>
+<p class=MsoNormal><b>7. Verification before pushing</b></p>
+<p class=MsoNormal>Build green, confirm nothing is left at the old paths, then review the whole change as a summary:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">./gradlew clean build</pre>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git status
+git diff main...JDK21 --stat</pre>
+<p class=MsoNormal><b>8. Afterwards</b></p>
+<p class=MsoNormal>Keep and tag the old branch &#8212; do not delete it until confident. Merge <code>JDK21</code> to <code>main</code> as a normal PR so Sonar runs on it before it lands.</p>
+
 </div>
 
 </body>
