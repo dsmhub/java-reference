@@ -410,6 +410,966 @@ div.WordSection1
 
 
 
+<p class=MsoNormal>&nbsp;</p>
+<p class=MsoNormal><b><span style='color:black'>TestGen (drop-in) — UAT T0</span></b></p>
+<p class=MsoNormal>Source: <code>shared/UAT/taskid_260718_110500/testgen/T0/testgen</code>. Drop the folder into the SUT module root as <code>testgen/</code>; mark as Test Sources; edit <code>classes.txt</code> (one FQCN per line); run <code>com.testgen.Runner</code> with working directory = module root. Analyses classes (dependency-graph hop-2, call chains, data flow) and generates JUnit 5 smoke-test skeletons; the LLM prompt below upgrades them into real tests.</p>
+<p class=MsoNormal><b>1. Generator code</b></p>
+<p class=MsoNormal><b>com/config/Config.java</b></p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package com.config;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+/**
+ * Drop-in contract: Run working directory = SUT module root.
+ * This folder lives at {@code MODULE/testgen/}.
+ */
+public final class Config {
+
+    /** SUT module root = process working directory. */
+    public static final Path MODULE = Path.of(&quot;&quot;).toAbsolutePath().normalize();
+
+    /**
+     * Production source root.
+     * null → {@code MODULE/src/main/java}
+     */
+    public static final Path MAIN_SOURCES = null;
+
+    /**
+     * Test source root (skeletons written here).
+     * null → {@code MODULE/src/test/java}
+     */
+    public static final Path TEST_SOURCES = null;
+
+    public static final String TEST_NAME_SUFFIX = &quot;Test&quot;;
+
+    /**
+     * {@code true}: inject step removes dependency-graph markers from source (no inject).
+     * {@code false}: inject step writes dependency-graph markers into source.
+     */
+    public static final boolean STRIP = false;
+
+    /** Call-chain recursion depth (ROADMAP tool 2). */
+    public static final int CALL_CHAIN_MAX_DEPTH = 3;
+
+    /** Cap edges emitted per method in call-chain. */
+    public static final int CALL_CHAIN_MAX_EDGES = 40;
+
+    private Config() {}
+
+    /**
+     * Optional method targets: {@code fqcn} or {@code fqcn#method} per line.
+     * If missing/empty, falls back to all public methods of {@link #classesList()}.
+     */
+    public static Path methodsList() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;methods.txt&quot;);
+    }
+
+    /** Method targets for call-chain / data-flow; defaults to classes.txt FQCNs. */
+    public static List&lt;String&gt; readMethodTargets() throws Exception {
+        Path list = methodsList();
+        if (Files.isRegularFile(list)) {
+            List&lt;String&gt; lines = Files.readAllLines(list).stream()
+                    .map(String::trim)
+                    .filter(line -&gt; !line.isEmpty() &amp;&amp; !line.startsWith(&quot;#&quot;))
+                    .toList();
+            if (!lines.isEmpty()) {
+                return lines;
+            }
+        }
+        return readClasses();
+    }
+
+    /** {@code MODULE/testgen/classes.txt} */
+    public static Path classesList() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;classes.txt&quot;);
+    }
+
+    /** {@code MODULE/testgen/reports} */
+    public static Path reportsDir() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;reports&quot;);
+    }
+
+    public static Path mainSourceRoot() {
+        return MAIN_SOURCES != null
+                ? MAIN_SOURCES.toAbsolutePath().normalize()
+                : MODULE.resolve(&quot;src&quot;).resolve(&quot;main&quot;).resolve(&quot;java&quot;);
+    }
+
+    public static Path testSourceRoot() {
+        return TEST_SOURCES != null
+                ? TEST_SOURCES.toAbsolutePath().normalize()
+                : MODULE.resolve(&quot;src&quot;).resolve(&quot;test&quot;).resolve(&quot;java&quot;);
+    }
+
+    public static List&lt;String&gt; readClasses() throws Exception {
+        Path list = classesList();
+        if (!Files.isRegularFile(list)) {
+            throw new IllegalStateException(&quot;classes list not found: &quot; + list);
+        }
+        return Files.readAllLines(list).stream()
+                // Strip UTF-8 BOM / zero-width junk editors and PowerShell Set-Content may add.
+                .map(line -&gt; line.replace(&quot;\uFEFF&quot;, &quot;&quot;).trim())
+                .filter(line -&gt; !line.isEmpty() &amp;&amp; !line.startsWith(&quot;#&quot;))
+                .toList();
+    }
+}</pre>
+<p class=MsoNormal><b>com/testgen/Runner.java</b></p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package com.testgen;
+
+import com.config.Config;
+
+/**
+ * IntelliJ entry point. Mark {@code testgen/} as Test Sources, set Run WD to the
+ * SUT module root, then Run. Comment out any call in {@link #main} to skip a step.
+ */
+public final class Runner {
+
+    private Runner() {}
+
+    public static void main(String[] args) throws Exception {
+        // Fail fast, helpfully, if the input contract isn't met.
+        java.util.List&lt;String&gt; classes;
+        try {
+            classes = Config.readClasses();
+        } catch (Exception e) {
+            System.out.println(&quot;ERROR: &quot; + e.getMessage());
+            System.out.println(&quot;Create testgen/classes.txt with one fully-qualified class name per line.&quot;);
+            System.exit(1);
+            return;
+        }
+        if (classes.isEmpty()) {
+            System.out.println(&quot;ERROR: testgen/classes.txt has no entries. Add YOUR project's&quot;
+                    + &quot; fully-qualified class names (one per line), then re-run.&quot;);
+            System.exit(1);
+            return;
+        }
+
+        // Each step is guarded: a failing step is reported and the rest still run,
+        // so one bad phase never hides the others' output. Comment out any step call
+        // you do not want to run this time.
+        int failedSteps = 0;
+        failedSteps += step(&quot;scan&quot;, Runner::scan);
+        failedSteps += step(&quot;inject&quot;, Runner::inject);
+        failedSteps += step(&quot;generate&quot;, Runner::generate);
+        failedSteps += step(&quot;callChain&quot;, Runner::callChain);
+        failedSteps += step(&quot;dataFlow&quot;, Runner::dataFlow);
+        if (failedSteps &gt; 0) {
+            System.out.println(&quot;testgen finished with &quot; + failedSteps + &quot; failed step(s) — see errors above.&quot;);
+            System.exit(1);
+        }
+    }
+
+    @FunctionalInterface
+    private interface Step {
+        void run() throws Exception;
+    }
+
+    private static int step(String name, Step s) {
+        try {
+            s.run();
+            return 0;
+        } catch (Throwable t) {
+            System.out.println(&quot;STEP &quot; + name + &quot; FAILED: &quot; + t.getClass().getSimpleName()
+                    + &quot;: &quot; + t.getMessage());
+            return 1;
+        }
+    }
+
+    static void callChain() throws Exception {
+        CallChainScanner.run();
+    }
+
+    static void dataFlow() throws Exception {
+        DataFlowScanner.run();
+    }
+
+    static void scan() throws Exception {
+        DepGraphScanner.run();
+    }
+
+    static void inject() throws Exception {
+        DepGraphInjector.run(Config.STRIP);
+    }
+
+    static void generate() throws Exception {
+        TestSkeletonGenerator.run();
+    }
+}</pre>
+<p class=MsoNormal><b>com/testgen/TestSkeletonGenerator.java</b></p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">package com.testgen;
+
+import com.config.Config;
+
+import com.squareup.javapoet.AnnotationSpec;
+import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.CodeBlock;
+import com.squareup.javapoet.FieldSpec;
+import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.MethodSpec;
+import com.squareup.javapoet.TypeName;
+import com.squareup.javapoet.TypeSpec;
+
+import javax.lang.model.element.Modifier;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
+/**
+ * Batch skeleton generator:
+ * - Instancio for concrete types + SUT instance (not manual ctor wiring)
+ * - Mockito.mock for interfaces; minimal stubbing for smoke act
+ * - instance + static in same class; static-only SUTs get static tests only
+ * - SUT contract methods: declared; if empty/thin → interfaces + immediate parent
+ * - mirrors declared checked exceptions on generated @Test methods
+ * - skip if *{suffix} already exists
+ *
+ * Array TypeName via {@link TypeName#get(java.lang.reflect.Type)} (javaPoetType).
+ */
+public final class TestSkeletonGenerator {
+
+    private static final ClassName INSTANCIO = ClassName.get(&quot;org.instancio&quot;, &quot;Instancio&quot;);
+    private static final ClassName SELECT = ClassName.get(&quot;org.instancio&quot;, &quot;Select&quot;);
+    private static final ClassName MOCKITO = ClassName.get(&quot;org.mockito&quot;, &quot;Mockito&quot;);
+    private static final ClassName MATCHERS = ClassName.get(&quot;org.mockito&quot;, &quot;ArgumentMatchers&quot;);
+    private static final ClassName TEST = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Test&quot;);
+    private static final ClassName DISABLED = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Disabled&quot;);
+    private static final ClassName BEFORE_EACH = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;BeforeEach&quot;);
+    private static final ClassName ASSERTIONS = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Assertions&quot;);
+
+    private TestSkeletonGenerator() {}
+
+    public static void run() throws Exception {
+        Path testSourceRoot = Config.testSourceRoot();
+        String suffix = Config.TEST_NAME_SUFFIX;
+        List&lt;String&gt; classes = Config.readClasses();
+
+        for (String fqcn : classes) {
+            try {
+                writeSkeleton(Class.forName(fqcn, false, TestSkeletonGenerator.class.getClassLoader()),
+                        testSourceRoot, suffix);
+            } catch (Throwable t) {
+                System.out.println(&quot;SKIP (unresolved &quot; + t.getClass().getSimpleName() + &quot;): &quot; + fqcn);
+            }
+        }
+    }
+
+    static void writeSkeleton(Class&lt;?&gt; sut, Path testSourceRoot, String suffix) throws Exception {
+        String testPackage = sut.getPackageName();
+        String testSimpleName = sut.getSimpleName() + suffix;
+        Path target = testSourceRoot
+                .resolve(testPackage.replace('.', '/'))
+                .resolve(testSimpleName + &quot;.java&quot;);
+        if (Files.exists(target)) {
+            System.out.println(&quot;SKIP (exists): &quot; + target);
+            return;
+        }
+
+        boolean staticOnly = isStaticOnlyClass(sut);
+        List&lt;Method&gt; instanceMethods = staticOnly ? List.of() : contractInstanceMethods(sut);
+        List&lt;Method&gt; staticMethods = contractStaticMethods(sut);
+        boolean staticPrefix = !staticOnly &amp;&amp; !instanceMethods.isEmpty();
+
+        TypeSpec.Builder testClass = TypeSpec.classBuilder(testSimpleName)
+                .addModifiers(Modifier.PUBLIC)
+                .addJavadoc(
+                        &quot;AUTO-GENERATED arrange skeleton for $L.\n&quot;
+                                + &quot;Instancio SUT + locals per test; Duo fills real asserts later.\n&quot;,
+                        sut.getName());
+
+        Set&lt;String&gt; usedNames = new HashSet&lt;&gt;();
+        if (!instanceMethods.isEmpty()) {
+            testClass.addField(FieldSpec.builder(ClassName.get(sut), &quot;sut&quot;, Modifier.PRIVATE).build());
+            testClass.addMethod(setUpMethod(sut));
+            for (Method m : instanceMethods) {
+                testClass.addMethod(instanceTest(m, usedNames));
+            }
+            // MEANINGFUL behavioural asserts (deterministic, no oracle needed):
+            for (MethodSpec t : setterGetterRoundTrips(sut, usedNames)) {
+                testClass.addMethod(t);
+            }
+        }
+        // Record: construct with known component values, assert each accessor returns it.
+        if (sut.isRecord() &amp;&amp; sut.getRecordComponents().length &gt; 0) {
+            testClass.addMethod(recordRoundTripTest(sut, usedNames));
+        }
+        if (!staticMethods.isEmpty()) {
+            for (Method m : staticMethods) {
+                testClass.addMethod(staticTest(sut, m, staticPrefix, usedNames));
+            }
+        }
+        if (instanceMethods.isEmpty() &amp;&amp; staticMethods.isEmpty()) {
+            System.out.println(&quot;WARN no public methods: &quot; + sut.getName());
+            testClass.addJavadoc(&quot;No public methods discovered.\n&quot;);
+        }
+
+        JavaFile.builder(testPackage, testClass.build())
+                .addFileComment(&quot;AUTO-GENERATED by testgen TestSkeletonGenerator&quot;)
+                .build()
+                .writeTo(testSourceRoot);
+
+        System.out.println(&quot;Wrote &quot; + testPackage + &quot;.&quot; + testSimpleName
+                + &quot; (instance=&quot; + instanceMethods.size() + &quot;, static=&quot; + staticMethods.size() + &quot;)&quot;);
+    }
+
+    private static MethodSpec setUpMethod(Class&lt;?&gt; sut) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(&quot;setUp&quot;)
+                .addAnnotation(BEFORE_EACH)
+                .addModifiers(Modifier.PUBLIC)
+                // setUp stubs mock methods that may declare checked exceptions (e.g. Closeable.close
+                // throws IOException). Declare throws Throwable so the arrange block compiles.
+                .addException(TypeName.get(Throwable.class));
+
+        List&lt;FieldMockRef&gt; fieldMocks = new ArrayList&lt;&gt;();
+        for (Field field : instanceFields(sut)) {
+            Class&lt;?&gt; ft = field.getType();
+            if (!ft.isInterface()) {
+                continue;
+            }
+            // JDK interface fields (List, Map, Set, ...) are NOT mocked: Instancio
+            // populates real implementations, which both compiles and behaves.
+            // Mocking a raw java.util.List produced non-compiling stubs (erased
+            // generics + ambiguous overloads) and NPEs on iteration.
+            if (isJdkType(ft)) {
+                continue;
+            }
+            String var = field.getName() + &quot;Mock&quot;;
+            fieldMocks.add(new FieldMockRef(ft, var, field.getDeclaringClass(), field.getName()));
+            b.addStatement(&quot;$T $L = $T.mock($T.class)&quot;,
+                    ClassName.get(ft), var, MOCKITO, ClassName.get(ft));
+        }
+
+        if (fieldMocks.isEmpty()) {
+            b.addStatement(&quot;sut = $T.create($T.class)&quot;, INSTANCIO, ClassName.get(sut));
+        } else {
+            CodeBlock.Builder chain = CodeBlock.builder().add(&quot;sut = $T.of($T.class)&quot;,
+                    INSTANCIO, ClassName.get(sut));
+            for (FieldMockRef mock : fieldMocks) {
+                chain.add(&quot;\n    .set($T.field($T.class, $S), $L)&quot;,
+                        SELECT, ClassName.get(mock.declaringClass), mock.fieldName, mock.varName);
+            }
+            chain.add(&quot;\n    .create();\n&quot;);
+            b.addCode(chain.build());
+        }
+
+        for (FieldMockRef mock : fieldMocks) {
+            b.addCode(minimalStubs(new MockRef(mock.type(), mock.varName())));
+        }
+        return b.build();
+    }
+
+    /**
+     * MEANINGFUL: a record's canonical constructor + accessors must round-trip. Build each
+     * component via Instancio, construct the record, assert every accessor returns the value it
+     * was given. Deterministic — no behavioural oracle needed, so it never false-fails on correct code.
+     */
+    private static MethodSpec recordRoundTripTest(Class&lt;?&gt; sut, Set&lt;String&gt; usedNames) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(&quot;record_componentsRoundTrip&quot;, usedNames))
+                .addModifiers(Modifier.PUBLIC).addAnnotation(TEST);
+        b.addException(TypeName.get(Throwable.class));
+        java.lang.reflect.RecordComponent[] comps = sut.getRecordComponents();
+        List&lt;String&gt; args = new ArrayList&lt;&gt;();
+        for (int i = 0; i &lt; comps.length; i++) {
+            String var = &quot;c&quot; + i + &quot;_&quot; + comps[i].getName();
+            b.addCode(arrangeLine(comps[i].getType(), var, new ArrayList&lt;&gt;()));
+            args.add(var);
+        }
+        b.addStatement(&quot;$T sut = new $T($L)&quot;, ClassName.get(sut), ClassName.get(sut), String.join(&quot;, &quot;, args));
+        for (int i = 0; i &lt; comps.length; i++) {
+            b.addStatement(&quot;$T.assertEquals($L, sut.$L())&quot;, ASSERTIONS, args.get(i), comps[i].getAccessor().getName());
+        }
+        return b.build();
+    }
+
+    /**
+     * MEANINGFUL: for each getX()/setX(T) (or isX()/setX(boolean)) property, set a value and assert
+     * the getter returns it — a real state round-trip, deterministic. Only emitted for a concrete,
+     * no-arg-constructible SUT (uses the Instancio-built `sut` field).
+     */
+    private static List&lt;MethodSpec&gt; setterGetterRoundTrips(Class&lt;?&gt; sut, Set&lt;String&gt; usedNames) {
+        List&lt;MethodSpec&gt; out = new ArrayList&lt;&gt;();
+        if (sut.isInterface() || java.lang.reflect.Modifier.isAbstract(sut.getModifiers())) {
+            return out;
+        }
+        java.util.Map&lt;String, Method&gt; getters = new java.util.LinkedHashMap&lt;&gt;();
+        java.util.Map&lt;String, Method&gt; setters = new java.util.LinkedHashMap&lt;&gt;();
+        for (Method m : sut.getMethods()) {
+            if (!java.lang.reflect.Modifier.isPublic(m.getModifiers()) || m.isSynthetic() || m.isBridge()) {
+                continue;
+            }
+            String n = m.getName();
+            if (m.getParameterCount() == 0 &amp;&amp; m.getReturnType() != void.class &amp;&amp; n.length() &gt; 3 &amp;&amp; n.startsWith(&quot;get&quot;)) {
+                getters.put(n.substring(3), m);
+            } else if (m.getParameterCount() == 0 &amp;&amp; m.getReturnType() == boolean.class &amp;&amp; n.length() &gt; 2 &amp;&amp; n.startsWith(&quot;is&quot;)) {
+                getters.put(n.substring(2), m);
+            } else if (m.getParameterCount() == 1 &amp;&amp; n.length() &gt; 3 &amp;&amp; n.startsWith(&quot;set&quot;)) {
+                setters.put(n.substring(3), m);
+            }
+        }
+        for (var e : setters.entrySet()) {
+            Method setter = e.getValue();
+            Method getter = getters.get(e.getKey());
+            if (getter == null || !getter.getReturnType().equals(setter.getParameterTypes()[0])) {
+                continue;
+            }
+            MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(&quot;roundTrip_&quot; + e.getKey(), usedNames))
+                    .addModifiers(Modifier.PUBLIC).addAnnotation(TEST).addException(TypeName.get(Throwable.class));
+            b.addCode(arrangeLine(setter.getParameterTypes()[0], &quot;v&quot;, new ArrayList&lt;&gt;()));
+            b.addStatement(&quot;sut.$L(v)&quot;, setter.getName());
+            b.addStatement(&quot;$T.assertEquals(v, sut.$L())&quot;, ASSERTIONS, getter.getName());
+            out.add(b.build());
+        }
+        return out;
+    }
+
+    /**
+     * @Disabled marker for a smoke placeholder (assertDoesNotThrow only). These verify no
+     * BEHAVIOUR — and on random Instancio input they even fail for methods with preconditions,
+     * polluting the SUT's real test suite. Disabled so they never run, never count toward
+     * pass-rate/coverage, and never break the build; a human/LLM fills a real assertion then
+     * removes @Disabled. (Meaningful round-trip tests are NOT disabled — they run for real.)
+     */
+    private static AnnotationSpec smokePlaceholder() {
+        return AnnotationSpec.builder(DISABLED)
+                .addMember(&quot;value&quot;, &quot;$S&quot;,
+                        &quot;testgen smoke placeholder — no behavioural assertion. Replace assertDoesNotThrow &quot;
+                                + &quot;with a real assert, then remove @Disabled. Do not count as coverage.&quot;)
+                .build();
+    }
+
+    private static MethodSpec instanceTest(Method method, Set&lt;String&gt; usedNames) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(safeName(method), usedNames))
+                .addModifiers(Modifier.PUBLIC)
+                .addAnnotation(TEST)
+                .addAnnotation(smokePlaceholder());
+        addDeclaredExceptions(method, b);
+
+        List&lt;MockRef&gt; mocks = new ArrayList&lt;&gt;();
+        List&lt;String&gt; methodArgNames = new ArrayList&lt;&gt;();
+        int j = 0;
+        for (Parameter p : method.getParameters()) {
+            String var = &quot;a&quot; + (j++) + &quot;_&quot; + simpleParamName(p);
+            b.addCode(arrangeLine(p.getType(), var, mocks));
+            methodArgNames.add(var);
+        }
+
+        for (MockRef mock : mocks) {
+            b.addCode(minimalStubs(mock));
+        }
+
+        String callArgs = String.join(&quot;, &quot;, methodArgNames);
+        // Smoke gate only: the skeleton's sole claim is &quot;executes without throwing on
+        // arbitrary valid-shaped input&quot;. Behavioral asserts (return values, state) are
+        // filled in later — a placeholder assertNotNull on e.g. a random-key lookup
+        // would fail on perfectly correct code.
+        b.addComment(&quot;TODO: replace with real behavioral asserts (LLM/Duo fill)&quot;);
+        b.addStatement(&quot;$T.assertDoesNotThrow(() -&gt; sut.$L($L))&quot;,
+                ASSERTIONS, method.getName(), callArgs);
+        return b.build();
+    }
+
+    private static MethodSpec staticTest(Class&lt;?&gt; sut, Method method, boolean prefix, Set&lt;String&gt; usedNames) {
+        String base = prefix ? &quot;static_&quot; + safeName(method) : safeName(method);
+        MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(base, usedNames))
+                .addModifiers(Modifier.PUBLIC)
+                .addAnnotation(TEST)
+                .addAnnotation(smokePlaceholder());
+        addDeclaredExceptions(method, b);
+
+        List&lt;MockRef&gt; mocks = new ArrayList&lt;&gt;();
+        List&lt;String&gt; methodArgNames = new ArrayList&lt;&gt;();
+        int j = 0;
+        for (Parameter p : method.getParameters()) {
+            String var = &quot;a&quot; + (j++) + &quot;_&quot; + simpleParamName(p);
+            b.addCode(arrangeLine(p.getType(), var, mocks));
+            methodArgNames.add(var);
+        }
+        for (MockRef mock : mocks) {
+            b.addCode(minimalStubs(mock));
+        }
+
+        String callArgs = String.join(&quot;, &quot;, methodArgNames);
+        // Call a static method on its DECLARING type, not the SUT: static methods declared on
+        // an interface are NOT inherited and cannot be invoked via the implementing class
+        // (e.g. Timer.of(...) is illegal as TimerImpl.of(...)).
+        ClassName sutCn = ClassName.get(method.getDeclaringClass());
+        // Same smoke-gate semantics as instance tests — see instanceTest.
+        b.addComment(&quot;TODO: replace with real behavioral asserts (LLM/Duo fill)&quot;);
+        b.addStatement(&quot;$T.assertDoesNotThrow(() -&gt; $T.$L($L))&quot;,
+                ASSERTIONS, sutCn, method.getName(), callArgs);
+        return b.build();
+    }
+
+    private static List&lt;Field&gt; instanceFields(Class&lt;?&gt; sut) {
+        List&lt;Field&gt; fields = new ArrayList&lt;&gt;();
+        Class&lt;?&gt; cur = sut;
+        while (cur != null &amp;&amp; cur != Object.class) {
+            // Skip JDK frames (e.g. Throwable.suppressedExceptions) — not SUT collaborators.
+            if (isJdkType(cur)) {
+                cur = cur.getSuperclass();
+                continue;
+            }
+            for (Field field : cur.getDeclaredFields()) {
+                if (!java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                    fields.add(field);
+                }
+            }
+            cur = cur.getSuperclass();
+        }
+        return fields;
+    }
+
+    private static boolean isJdkType(Class&lt;?&gt; type) {
+        Package p = type.getPackage();
+        if (p == null) {
+            return false;
+        }
+        String n = p.getName();
+        return n.equals(&quot;java&quot;) || n.startsWith(&quot;java.&quot;)
+                || n.equals(&quot;javax&quot;) || n.startsWith(&quot;javax.&quot;)
+                || n.equals(&quot;jdk&quot;) || n.startsWith(&quot;jdk.&quot;);
+    }
+
+    private static boolean isStaticOnlyClass(Class&lt;?&gt; sut) {
+        return filterInstance(sut.getDeclaredMethods()).isEmpty()
+                &amp;&amp; !filterStatic(sut.getDeclaredMethods()).isEmpty();
+    }
+
+    /** Prefer TypeName.get so arrays (and generics) render correctly. */
+    private static TypeName javaPoetType(Class&lt;?&gt; type) {
+        return TypeName.get(type);
+    }
+
+    private static CodeBlock arrangeLine(Class&lt;?&gt; type, String varName, List&lt;MockRef&gt; mocks) {
+        // JDK interfaces (List/Map/…) → real Instancio instances, never Mockito.
+        if (type.isInterface() &amp;&amp; isJdkType(type)) {
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;,
+                    ClassName.get(type), varName, INSTANCIO, ClassName.get(type));
+        }
+        if (type.isInterface()) {
+            mocks.add(new MockRef(type, varName));
+            return CodeBlock.of(&quot;$T $L = $T.mock($T.class);\n&quot;,
+                    ClassName.get(type), varName, MOCKITO, ClassName.get(type));
+        }
+        if (type == Class.class) {
+            return CodeBlock.of(&quot;$T&lt;?&gt; $L = $T.class;\n&quot;,
+                    ClassName.get(Class.class), varName, ClassName.get(String.class));
+        }
+        if (type == java.math.BigDecimal.class) {
+            return CodeBlock.of(&quot;$T $L = $T.ZERO;\n&quot;,
+                    ClassName.get(java.math.BigDecimal.class), varName,
+                    ClassName.get(java.math.BigDecimal.class));
+        }
+        if (type.isPrimitive()) {
+            Class&lt;?&gt; boxed = box(type);
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;,
+                    ClassName.get(boxed), varName, INSTANCIO, ClassName.get(boxed));
+        }
+        return arrangeConcrete(type, varName, mocks);
+    }
+
+    private static CodeBlock arrangeConcrete(Class&lt;?&gt; type, String varName, List&lt;MockRef&gt; mocks) {
+        List&lt;Field&gt; ifaceFields = interfaceInstanceFields(type);
+        if (ifaceFields.isEmpty()) {
+            TypeName tn = javaPoetType(type);
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;, tn, varName, INSTANCIO, tn);
+        }
+        CodeBlock.Builder block = CodeBlock.builder();
+        for (Field field : ifaceFields) {
+            String mockVar = varName + &quot;_&quot; + field.getName() + &quot;Mock&quot;;
+            mocks.add(new MockRef(field.getType(), mockVar));
+            block.addStatement(&quot;$T $L = $T.mock($T.class)&quot;,
+                    ClassName.get(field.getType()), mockVar, MOCKITO, ClassName.get(field.getType()));
+        }
+        CodeBlock.Builder chain = CodeBlock.builder().add(&quot;$T $L = $T.of($T.class)&quot;,
+                ClassName.get(type), varName, INSTANCIO, ClassName.get(type));
+        for (Field field : ifaceFields) {
+            String mockVar = varName + &quot;_&quot; + field.getName() + &quot;Mock&quot;;
+            chain.add(&quot;\n    .set($T.field($T.class, $S), $L)&quot;,
+                    SELECT, ClassName.get(field.getDeclaringClass()), field.getName(), mockVar);
+        }
+        chain.add(&quot;\n    .create();\n&quot;);
+        block.add(chain.build());
+        return block.build();
+    }
+
+    private static List&lt;Field&gt; interfaceInstanceFields(Class&lt;?&gt; type) {
+        List&lt;Field&gt; out = new ArrayList&lt;&gt;();
+        for (Field field : instanceFields(type)) {
+            // Same rule as setUp: JDK interfaces are Instancio's job, not Mockito's.
+            if (field.getType().isInterface() &amp;&amp; !isJdkType(field.getType())) {
+                out.add(field);
+            }
+        }
+        return out;
+    }
+
+    private static void addDeclaredExceptions(Method method, MethodSpec.Builder testMethod) {
+        // A generated test both invokes the SUT method AND stubs mock methods (in the arrange
+        // block, outside any assertDoesNotThrow lambda). Either can declare checked exceptions,
+        // including Throwable (e.g. EventHandler.onEvent throws Throwable). Declaring the test
+        // method `throws Throwable` is the simplest guarantee it compiles; JUnit 5 permits it.
+        testMethod.addException(TypeName.get(Throwable.class));
+    }
+
+    private static CodeBlock minimalStubs(MockRef mock) {
+        CodeBlock.Builder stubs = CodeBlock.builder();
+        // Overloaded method names are never stubbed: untyped any() matchers against
+        // overloads produce ambiguous or type-mismatched calls that fail compilation
+        // (e.g. List.remove(Object)/remove(int), List.toArray(T[])/toArray(IntFunction)).
+        java.util.Map&lt;String, Integer&gt; nameCounts = new java.util.HashMap&lt;&gt;();
+        for (Method m : mock.type.getMethods()) {
+            if (include(m) &amp;&amp; !java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                nameCounts.merge(m.getName(), 1, Integer::sum);
+            }
+        }
+        for (Method m : mock.type.getMethods()) {
+            if (!include(m) || java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                continue;
+            }
+            if (nameCounts.getOrDefault(m.getName(), 0) &gt; 1) {
+                continue;
+            }
+            CodeBlock anyArgs = anyMatchers(m.getParameterCount());
+            Class&lt;?&gt; ret = m.getReturnType();
+            if (ret == void.class) {
+                stubs.addStatement(&quot;$T.doNothing().when($L).$L($L)&quot;,
+                        MOCKITO, mock.varName, m.getName(), anyArgs);
+            } else if (ret.isPrimitive()) {
+                stubs.addStatement(&quot;$T.when($L.$L($L)).thenReturn($L)&quot;,
+                        MOCKITO, mock.varName, m.getName(), anyArgs, primitiveDefaultExpr(ret));
+            } else if (isStubbableReturn(ret)) {
+                TypeName retTn = javaPoetType(ret);
+                stubs.addStatement(&quot;$T.when($L.$L($L)).thenReturn($T.create($T.class))&quot;,
+                        MOCKITO, mock.varName, m.getName(), anyArgs, INSTANCIO, retTn);
+            }
+            // Other returns (Object = erased generic, interfaces, abstract types) are
+            // left to Mockito's safe defaults rather than stubbed with guesses.
+        }
+        return stubs.build();
+    }
+
+    /** Only concrete, non-Object classes are worth stubbing via Instancio. */
+    private static boolean isStubbableReturn(Class&lt;?&gt; ret) {
+        if (ret == Object.class || ret.isInterface()) {
+            return false;
+        }
+        return !java.lang.reflect.Modifier.isAbstract(ret.getModifiers());
+    }
+
+    private static CodeBlock anyMatchers(int count) {
+        if (count &lt;= 0) {
+            return CodeBlock.of(&quot;&quot;);
+        }
+        CodeBlock.Builder sb = CodeBlock.builder();
+        for (int i = 0; i &lt; count; i++) {
+            if (i &gt; 0) {
+                sb.add(&quot;, &quot;);
+            }
+            sb.add(&quot;$T.any()&quot;, MATCHERS);
+        }
+        return sb.build();
+    }
+
+    private static String primitiveDefaultExpr(Class&lt;?&gt; prim) {
+        // Type-correct literals: Mockito's thenReturn(T) can't autobox an int literal to
+        // Double/Long/Float (e.g. thenReturn(0) for a double-returning method fails to compile).
+        if (prim == boolean.class) return &quot;false&quot;;
+        if (prim == char.class) return &quot;'\\0'&quot;;
+        if (prim == long.class) return &quot;0L&quot;;
+        if (prim == float.class) return &quot;0f&quot;;
+        if (prim == double.class) return &quot;0.0&quot;;
+        if (prim == short.class) return &quot;(short) 0&quot;;
+        if (prim == byte.class) return &quot;(byte) 0&quot;;
+        return &quot;0&quot;; // int
+    }
+
+    private static List&lt;Method&gt; contractInstanceMethods(Class&lt;?&gt; sut) {
+        List&lt;Method&gt; declared = filterInstance(sut.getDeclaredMethods());
+        if (!isThin(declared)) {
+            return dedupe(declared);
+        }
+        LinkedHashSet&lt;Method&gt; contract = new LinkedHashSet&lt;&gt;(declared);
+        for (Class&lt;?&gt; iface : allInterfaces(sut)) {
+            contract.addAll(filterInstance(iface.getMethods()));
+        }
+        Class&lt;?&gt; parent = sut.getSuperclass();
+        if (parent != null &amp;&amp; parent != Object.class) {
+            contract.addAll(filterInstance(parent.getDeclaredMethods()));
+        }
+        return dedupe(new ArrayList&lt;&gt;(contract));
+    }
+
+    private static List&lt;Method&gt; contractStaticMethods(Class&lt;?&gt; sut) {
+        List&lt;Method&gt; declared = filterStatic(sut.getDeclaredMethods());
+        if (!declared.isEmpty()) {
+            return dedupe(declared);
+        }
+        LinkedHashSet&lt;Method&gt; contract = new LinkedHashSet&lt;&gt;();
+        for (Class&lt;?&gt; iface : allInterfaces(sut)) {
+            contract.addAll(filterStatic(iface.getMethods()));
+        }
+        Class&lt;?&gt; parent = sut.getSuperclass();
+        if (parent != null &amp;&amp; parent != Object.class) {
+            contract.addAll(filterStatic(parent.getDeclaredMethods()));
+        }
+        return dedupe(new ArrayList&lt;&gt;(contract));
+    }
+
+    private static boolean isThin(List&lt;Method&gt; declared) {
+        if (declared.isEmpty()) {
+            return true;
+        }
+        for (Method m : declared) {
+            if (!looksLikeAccessor(m)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean looksLikeAccessor(Method m) {
+        if (m.getParameterCount() != 0 || m.getReturnType() == void.class) {
+            return false;
+        }
+        String n = m.getName();
+        return n.startsWith(&quot;get&quot;) || n.startsWith(&quot;is&quot;);
+    }
+
+    private static List&lt;Class&lt;?&gt;&gt; allInterfaces(Class&lt;?&gt; type) {
+        LinkedHashSet&lt;Class&lt;?&gt;&gt; out = new LinkedHashSet&lt;&gt;();
+        Class&lt;?&gt; cur = type;
+        while (cur != null &amp;&amp; cur != Object.class) {
+            out.addAll(Arrays.asList(cur.getInterfaces()));
+            for (Class&lt;?&gt; iface : cur.getInterfaces()) {
+                collectInterfaces(iface, out);
+            }
+            cur = cur.getSuperclass();
+        }
+        return new ArrayList&lt;&gt;(out);
+    }
+
+    private static void collectInterfaces(Class&lt;?&gt; iface, Set&lt;Class&lt;?&gt;&gt; out) {
+        if (!out.add(iface)) {
+            return;
+        }
+        for (Class&lt;?&gt; parent : iface.getInterfaces()) {
+            collectInterfaces(parent, out);
+        }
+    }
+
+    private static List&lt;Method&gt; filterInstance(Method[] methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        for (Method m : methods) {
+            if (include(m) &amp;&amp; !java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static List&lt;Method&gt; filterStatic(Method[] methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        for (Method m : methods) {
+            if (include(m) &amp;&amp; java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static List&lt;Method&gt; dedupe(List&lt;Method&gt; methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        Set&lt;String&gt; seen = new HashSet&lt;&gt;();
+        for (Method m : methods) {
+            String key = m.getName() + Arrays.toString(m.getParameterTypes());
+            if (seen.add(key)) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static boolean include(Method m) {
+        int mod = m.getModifiers();
+        if (!java.lang.reflect.Modifier.isPublic(mod)) {
+            return false;
+        }
+        if (m.isSynthetic() || m.isBridge()) {
+            return false;
+        }
+        String n = m.getName();
+        if (n.equals(&quot;equals&quot;) || n.equals(&quot;hashCode&quot;) || n.equals(&quot;toString&quot;) || n.equals(&quot;getClass&quot;)
+                || n.equals(&quot;notify&quot;) || n.equals(&quot;notifyAll&quot;) || n.equals(&quot;wait&quot;)) {
+            return false;
+        }
+        // Framework methods from java.lang.Enum / java.lang.Comparable are not authored SUT
+        // behavior (same rationale as equals/hashCode above). Their ERASED signatures also break
+        // compile: an enum's real compareTo(SelfType) is generated as compareTo(Object) from the
+        // Comparable contract -&gt; &quot;Object cannot be converted to &lt;Enum&gt;&quot;. The SUT's OWN methods
+        // (business logic, an enum's abstract apply(), etc.) are still generated.
+        Class&lt;?&gt; dc = m.getDeclaringClass();
+        if (dc == Enum.class || dc == Comparable.class) {
+            return false;
+        }
+        return true;
+    }
+
+    private static final Set&lt;String&gt; OBJECT_METHOD_NAMES = Set.of(
+            &quot;clone&quot;, &quot;finalize&quot;, &quot;wait&quot;, &quot;notify&quot;, &quot;notifyAll&quot;,
+            &quot;equals&quot;, &quot;hashCode&quot;, &quot;toString&quot;, &quot;getClass&quot;, &quot;registerNatives&quot;);
+
+    private static String safeName(Method m) {
+        String base = m.getName();
+        // A @Test method must not be named after a java.lang.Object method: e.g. a `void clone()`
+        // in the test class illegally overrides Object.clone() (return-type clash). Mangle it.
+        if (OBJECT_METHOD_NAMES.contains(base)) {
+            base = &quot;sut_&quot; + base;
+        }
+        if (m.getParameterCount() == 0) {
+            return base;
+        }
+        return base + &quot;_&quot; + m.getParameterCount() + &quot;args&quot;;
+    }
+
+    private static String uniqueName(String base, Set&lt;String&gt; usedNames) {
+        String name = base;
+        int i = 2;
+        while (!usedNames.add(name)) {
+            name = base + &quot;_&quot; + i++;
+        }
+        return name;
+    }
+
+    private static String simpleParamName(Parameter p) {
+        String n = p.getName();
+        if (n == null || n.startsWith(&quot;arg&quot;)) {
+            n = p.getType().getSimpleName();
+        }
+        return n.replaceAll(&quot;[^A-Za-z0-9_]&quot;, &quot;&quot;);
+    }
+
+    private static Class&lt;?&gt; box(Class&lt;?&gt; primitive) {
+        if (primitive == boolean.class) return Boolean.class;
+        if (primitive == int.class) return Integer.class;
+        if (primitive == long.class) return Long.class;
+        if (primitive == double.class) return Double.class;
+        if (primitive == float.class) return Float.class;
+        if (primitive == short.class) return Short.class;
+        if (primitive == byte.class) return Byte.class;
+        if (primitive == char.class) return Character.class;
+        return primitive;
+    }
+
+    private record MockRef(Class&lt;?&gt; type, String varName) {}
+
+    private record FieldMockRef(Class&lt;?&gt; type, String varName, Class&lt;?&gt; declaringClass, String fieldName) {}
+}</pre>
+<p class=MsoNormal><b>2. Build config</b></p>
+<p class=MsoNormal>Add to your module’s <code>build.gradle</code> (bottom of file):</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">// ---- testgen add-on ----
+sourceSets { main { java { srcDirs 'src/main/java', 'testgen' } } }
+dependencies {
+    // tool itself (main scope — it compiles alongside your sources)
+    implementation 'com.squareup:javapoet:1.13.0'
+    implementation 'com.github.javaparser:javaparser-core:3.26.3'
+    // generated tests need these (test scope)
+    testImplementation 'org.instancio:instancio-junit:5.6.0'
+    testImplementation 'org.mockito:mockito-core:5.11.0'
+    // plus JUnit 5, which your project likely already has:
+    // testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
+    // testRuntimeOnly  'org.junit.jupiter:junit-jupiter-engine:5.8.1'
+}
+tasks.register('testgenRun', JavaExec) {
+    dependsOn 'classes'
+    mainClass = 'com.testgen.Runner'
+    classpath = sourceSets.main.compileClasspath + sourceSets.main.runtimeClasspath
+    workingDir = projectDir
+}</pre>
+<p class=MsoNormal>Classpath-union init script <code>com/config/print-classpath-union.init.gradle</code> (resolves <code>compileOnly</code> collaborators under reflection):</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">// Owned by testgenlite — do not add to target projects.
+// Prints UNION of test.runtimeClasspath + main/test compileClasspath so
+// reflection can resolve compileOnly collaborators (servlet, ejb, jsr305, …).
+gradle.projectsLoaded {
+    rootProject.allprojects { proj -&gt;
+        proj.afterEvaluate {
+            if (tasks.findByName('testgenPrintTestClasspath') != null) {
+                return
+            }
+            def hasJava = plugins.hasPlugin('java') ||
+                    plugins.hasPlugin('java-library') ||
+                    plugins.hasPlugin('org.gradle.java')
+            if (!hasJava) {
+                return
+            }
+            tasks.register('testgenPrintTestClasspath') {
+                group = 'testgen'
+                description = 'Print union classpath for reflection (test + compileOnly)'
+                dependsOn classes
+                doLast {
+                    def union = files(
+                            sourceSets.test.runtimeClasspath,
+                            sourceSets.main.compileClasspath,
+                            sourceSets.test.compileClasspath
+                    )
+                    println union.asPath
+                }
+            }
+        }
+    }
+}</pre>
+<p class=MsoNormal><b>3. LLM prompt (arrange upgrade)</b></p>
+<p class=MsoNormal>Paste into an LLM after scan + generate to upgrade the smoke skeleton into real tests. Second shot: prepend compiler/test errors under the same rules (max 2 shots).</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;"># Duo-style arrange upgrade (batch)
+
+Upgrade the auto-generated JUnit 5 smoke skeleton into meaningful unit tests.
+
+## Rules
+- Edit ONLY the test class. Do not change production SUT.
+- Use ONLY types/methods in the SUT (+ any types it clearly uses). No invented APIs.
+- Interface collaborators: Mockito.mock + stub hop-1 calls shown in // BEGIN testgen-dependencies.
+- Prefer Instancio.of(SUT).set(...) / @BeforeEach pattern from the scaffold.
+- Replace smoke asserts with behaviour asserts grounded in source.
+- Unchecked exceptions in source: use assertThrows where appropriate.
+- Keep the test class name ending in ArrangeTest (or your generate suffix).
+- The public class name MUST match the filename.
+- Do NOT invent helper/stub production classes.
+- Output ONE complete Java source file only — no markdown fences, no commentary.
+
+## Dirty SUT (includes testgen-dependencies graph if present)
+
+```java
+{{paste production class source, including // BEGIN testgen-dependencies … // END block}}
+```
+
+## Current scaffold
+
+```java
+{{paste the generated *Test / *ArrangeTest skeleton}}
+```</pre>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;"># Fix (shot 2)
+
+Fix the test class. Same rules as before. Keep class name matching the file.
+
+## Compiler / test errors
+
+{{paste compile or test failure text}}
+
+## Current test source
+
+```java
+{{paste current test file}}
+```</pre>
+
 </div>
 
 </body>
