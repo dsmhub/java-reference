@@ -470,6 +470,39 @@ git diff main...JDK21 --stat</pre>
 <p class=MsoNormal><b>8. Afterwards</b></p>
 <p class=MsoNormal>Keep and tag the old branch &#8212; do not delete it until confident. Merge <code>JDK21</code> to <code>main</code> as a normal PR so Sonar runs on it before it lands.</p>
 
+<p class=MsoNormal>&nbsp;</p>
+<p class=MsoNormal><b><span style='color:black'>Line endings (CRLF vs LF) &#8212; checking and managing them</span></b></p>
+<p class=MsoNormal><i>Working on a Mac against a repo with Windows contributors, the risk is a line-ending flip that makes every line of a file read as changed. That is the same trap as the folder move in the section above (a change arriving &#8220;through a different door&#8221;): it would defeat the Sonar work, so line endings must be under control before and during any file move.</i></p>
+<p class=MsoNormal><b>1. What is in the repo now</b></p>
+<p class=MsoNormal>Count each line-ending type across tracked files. All <code>i/lf</code> is healthy; a mix of <code>i/lf</code> and <code>i/crlf</code> means it is already inconsistent. <i>(Git Bash)</i></p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git ls-files --eol | awk '{print $1}' | sort | uniq -c</pre>
+<p class=MsoNormal><b>2. What the local machine does to files</b></p>
+<p class=MsoNormal>Shows the local checkout/commit conversion setting:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git config --get core.autocrlf</pre>
+<p class=MsoNormal>On <b>macOS</b>: you want <code>input</code> (commit LF, no checkout rewriting) or unset. Never <code>true</code> &#8212; that is the Windows setting and it rewrites files on checkout. On <b>Windows</b> the conventional value is <code>true</code>, but with the <code>.gitattributes</code> in step 4 the repository enforces LF regardless of anyone's local setting, which is what actually keeps it consistent.</p>
+<p class=MsoNormal><b>3. Whether the repo defends itself</b></p>
+<p class=MsoNormal>If this file is absent, each developer's local config decides behaviour &#8212; that is how repos drift:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">cat .gitattributes</pre>
+<p class=MsoNormal><b>4. The fix &#8212; a .gitattributes at the repo root</b></p>
+<p class=MsoNormal>Forces LF in the repository regardless of who commits from what:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh text eol=lf</pre>
+<p class=MsoNormal>Plus, on macOS:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git config --global core.autocrlf input</pre>
+<p class=MsoNormal><b>5. Fixing an already-mixed repo</b></p>
+<p class=MsoNormal>Do this as <b>its own commit</b>, with nothing else in it:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git add --renormalize .
+git commit -m &quot;Normalise line endings&quot;</pre>
+<p class=MsoNormal><b style='color:#b00'>Why it must be isolated:</b> mixed with content changes, a normalisation commit becomes unreviewable and hides the real edits inside a sea of line-ending churn.</p>
+<p class=MsoNormal><b>6. Telling a line-ending diff from a real one</b></p>
+<p class=MsoNormal>If the first shows the whole file changed and the second shows nothing, it is purely line endings &#8212; no real content moved. If the second still shows lines, that part is a genuine change:</p>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git diff --stat</pre>
+<pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git diff --ignore-cr-at-eol</pre>
+<p class=MsoNormal><b>7. Practical warning</b></p>
+<p class=MsoNormal><b style='color:#b00'>Check line endings on BOTH branches before moving files between them.</b> If one side is CRLF and the other LF, every line of every moved file reads as changed &#8212; and the move (section above) then looks like a full rewrite to Sonar.</p>
+
 </div>
 
 </body>
