@@ -410,6 +410,27 @@ div.WordSection1
 
 
 
+<p class=MsoNormal>&nbsp;</p>
+<p class=MsoNormal><b><span style='color:black'>Analysing a repo — comparing branches &amp; deciding what to bring across</span></b></p>
+<p class=MsoNormal><i>Pure <code>git</code> commands run in any shell (cmd, PowerShell, Git Bash). Commands piped through <code>awk</code> / <code>sort</code> / <code>uniq</code> are marked <b>(Git Bash only)</b> — they will not run in cmd or PowerShell; use the Git Bash shell bundled with Git for Windows. Replace <code>main</code> / <code>feature</code> with your two branch names; <code>A..B</code> means changes on B since the merge base, <code>A...B</code> is the symmetric difference.</i></p>
+<p class=MsoNormal><b>What one branch has that another does not</b></p>
+<p class=MsoNormal>Counts of commits each branch has that the other lacks — left = main-only, right = feature-only; the size of the gap at a glance:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git rev-list --left-right --count main...feature</pre>
+<p class=MsoNormal>Feature's commits marked + (not yet in main) or - (already applied, matched by patch-id) — your cherry-pick shortlist, and it catches ones already brought across under a different hash:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git cherry -v main feature</pre>
+<p class=MsoNormal>Readable summary of every commit in feature-but-not-main, grouped by author — a quick overview of what the branch actually contains:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git shortlog --no-merges main..feature</pre>
+<p class=MsoNormal><b>Quantify the difference</b></p>
+<p class=MsoNormal>Every file that differs between the two branch tips, with per-file +/- bars and a grand total — the overall size of the change:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git diff --stat main..feature</pre>
+<p class=MsoNormal>Each differing file tagged Added / Modified / Deleted — what changed and how, without the diff body:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git diff --name-status main..feature</pre>
+<p class=MsoNormal>Files that exist on feature but not on main (added) — the net-new files unique to the branch:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git diff --name-only --diff-filter=A main..feature</pre>
+<p class=MsoNormal><b>Rank files — which carry the weight, which are contested</b></p>
+<p class=MsoNormal>Files ranked by total lines changed across the range — the files carrying the most churn (decide these deliberately): <i>(Git Bash only)</i></p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git log --numstat --format= main..feature | awk 'NF==3{a[$3]+=$1;d[$3]+=$2} END{for(f in a) printf &quot;%6d  +%-6d -%-6d %s\n&quot;, a[f]+d[f], a[f], d[f], f}' | sort -rn | head -20</pre>
+<p class=MsoNormal>Files ranked by how many commits in the range touched them — the frequently-touched, often-contested files: <i>(Git Bash only)</i></p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git log --format= --name-only main..feature | sort | uniq -c | sort -rn | head -20</pre>
+<p class=MsoNormal><b>Spot messy commits, and size the range</b></p>
+<p class=MsoNormal>Each commit followed by its files-changed / insertions / deletions line — scan for the oversized commits that likely mix unrelated concerns:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git log --format='%h %s' --shortstat main..feature</pre>
+<p class=MsoNormal>Total lines added and removed across the whole range — one number for how big the bring-across is: <i>(Git Bash only)</i></p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git log --numstat --format= main..feature | awk '{a+=$1;d+=$2} END{print &quot;added=&quot;a&quot;  removed=&quot;d}'</pre>
+<p class=MsoNormal><b>Target one file, or reconcile diverged series</b></p>
+<p class=MsoNormal>Only the commits on feature (not main) that touched a given path — find exactly the commits to cherry-pick for that file:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git log --oneline main..feature -- path/to/file</pre>
+<p class=MsoNormal>Compare two similar commit series (e.g. before/after a rebase or a partial cherry-pick) to see what genuinely differs between them — for reconciling branches that have diverged:</p><pre style="font-family: Consolas, monospace; font-size: 9pt; white-space: pre-wrap;">git range-diff main feature~5 feature</pre>
+
 </div>
 
 </body>
