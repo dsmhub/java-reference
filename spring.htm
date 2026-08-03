@@ -334,22 +334,6 @@ div.WordSection1
  <tr>
   <td width=1018 valign=top style='width:763.35pt;border:solid #A3A3A3 1.0pt;
   border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
-  <p class=MsoNormal><b>Repo-sizing grep commands (Instancio fixture-viability check)</b></p>
-  <p class=MsoNormal><b>1. Total types (denominator):</b><br><code>grep -rEl &quot;(class|interface|enum|record)[[:space:]]+[A-Za-z_]&quot; --include=*.java . | wc -l</code></p>
-  <p class=MsoNormal><b>2. Interfaces / abstract classes:</b><br><code>grep -rEl &quot;interface[[:space:]]+[A-Za-z_]&quot; --include=*.java . | wc -l</code><br><code>grep -rEl &quot;abstract[[:space:]]+class[[:space:]]+[A-Za-z_]&quot; --include=*.java . | wc -l</code></p>
-  <p class=MsoNormal><b>3. Distinct interface/abstract type names (the real cost number):</b><br><code>grep -rhoE &quot;interface[[:space:]]+[A-Za-z_][A-Za-z0-9_]*&quot; --include=*.java . | awk '{print $NF}'  &gt;  iface_types.txt</code><br><code>grep -rhoE &quot;abstract[[:space:]]+class[[:space:]]+[A-Za-z_][A-Za-z0-9_]*&quot; --include=*.java . | awk '{print $NF}' &gt;&gt; iface_types.txt</code><br><code>sort -u iface_types.txt -o iface_types.txt</code><br><code>wc -l iface_types.txt</code></p>
-  <p class=MsoNormal><b>4. Exposure (classes with a field of one of those types):</b><br><code>while read T; do</code><br><code>  grep -rlE &quot;private[[:space:]]+(final[[:space:]]+)?$T[[:space:]]+[A-Za-z_]&quot; --include=*.java .</code><br><code>done &lt; iface_types.txt | sort -u | wc -l</code></p>
-  <p class=MsoNormal><b>5. Generic class declarations:</b><br><code>grep -rEl &quot;class[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*&lt;&quot; --include=*.java . | wc -l</code></p>
-  </td>
-  <td width=313 valign=top style='width:235.0pt;border-top:none;border-left:
-  none;border-bottom:solid #A3A3A3 1.0pt;border-right:solid #A3A3A3 1.0pt;
-  padding:4.0pt 4.0pt 4.0pt 4.0pt'>
-  <p class=MsoNormal>&nbsp;</p>
-  </td>
- </tr>
- <tr>
-  <td width=1018 valign=top style='width:763.35pt;border:solid #A3A3A3 1.0pt;
-  border-top:none;padding:4.0pt 4.0pt 4.0pt 4.0pt'>
   <p class=MsoNormal>&nbsp;</p>
   </td>
   <td width=313 valign=top style='width:235.0pt;border-top:none;border-left:
