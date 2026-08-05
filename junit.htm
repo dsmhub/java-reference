@@ -304,6 +304,2745 @@ div.WordSection1
 
 </div>
 
+
+<h2>testgen v3.4 &ndash; changes since v3 (2026-08-05)</h2>
+<h3>Summary of changes</h3>
+<p>v3.4 is the canonical release: the v3 line with all fixes from all agents (cumulative). 32 skeleton-generation fixes &ndash; the arrange skeleton now emits <b>real values instead of null-yielding mocks</b> for every common shape: generics, collections, Optional/Future/Map.Entry value-holders, sealed types, Class&lt;T&gt;, arrays, byte/short, mockStatic + mockConstruction, intersection bounds, type-variable resolution (incl. call-site Class&lt;T&gt; factories), abstract-class fields, fluent self-return &ndash; plus graph fixes: overloaded methods no longer overwrite each other, phantom enum fields removed, enum-with-abstract-method now gets tests. Still open: per-overload report content (BUG-1b); nested/inner-class FQCN (BUG-3).</p>
+<p><b>Evidence.</b> Deterministic tool test on 137 hard SUTs: v3.1 = 8 compile errors (suite blocked) vs v3.4 = 0. LLM benchmark (cerebras, same runner, same day): v3.4 85% line coverage vs v3.1 78%, both 0 compile errors.</p>
+<h3>How to run (README.md)</h3>
+<pre># testgen v3.4 (drop-in)
+
+Offline test-scaffold generator (JUnit 5 + Mockito + Instancio). Copy this folder into the SUT module
+root as `testgen/`. No foreign classpath - tools load SUT types via the module's own test classpath.
+
+## How to run
+1. Copy this folder to `&lt;module-root&gt;/testgen/`.
+2. In IntelliJ: mark `testgen/` as Test Sources Root.
+3. Set the Run configuration Working directory to the module root (parent of `testgen/`).
+4. Edit `testgen/classes.txt` (one FQCN per line; `#` comments OK).
+5. Run `com.testgen.Runner`. Offline - JavaParser + JavaPoet + reflection, no LLM. Comment out any
+   call in Runner.main to skip a step; Config.STRIP=true reverses the inject.
+6. Gate: `gradle compileTestJava` then `gradle test`. An LLM then fills the assertions using the prompt below.</pre>
+<h3>Source (full current source, testgen/)</h3>
+<h4>Runner.java</h4>
+<pre>package com.testgen;
+
+import com.config.Config;
+
+import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.StaticJavaParser;
+
+/**
+ * IntelliJ entry point. Mark {@code testgen/} as Test Sources, set Run WD to the
+ * SUT module root, then Run. Comment out any call in {@link #main} to skip a step.
+ */
+public final class Runner {
+
+    private Runner() {}
+
+    public static void main(String[] args) throws Exception {
+        // Parse modern Java (records/sealed/text-blocks) — JavaParser defaults to an old level.
+        StaticJavaParser.getParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21);
+        if (Config.STRIP) {
+            strip();   // reverse pass: remove the graph block; no scan, no generate
+            return;
+        }
+
+        dependencies();
+        callChain();
+        dataFlow();
+        embed();
+        generate();
+    }
+
+    static void callChain() throws Exception {
+        CallChainScanner.run();
+    }
+
+    static void dataFlow() throws Exception {
+        DataFlowScanner.run();
+    }
+
+    static void dependencies() throws Exception {
+        DepGraphScanner.run();
+    }
+
+    static void embed() throws Exception {
+        DepGraphMarker.embed();
+    }
+
+    static void strip() throws Exception {
+        DepGraphMarker.strip();
+    }
+
+    static void generate() throws Exception {
+        TestSkeletonGenerator.run();
+    }
+}
+</pre>
+<h4>Config.java</h4>
+<pre>package com.config;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+/**
+ * Drop-in contract: Run working directory = SUT module root.
+ * This folder lives at {@code MODULE/testgen/}.
+ */
+public final class Config {
+
+    /** SUT module root = process working directory. */
+    public static final Path MODULE = Path.of(&quot;&quot;).toAbsolutePath().normalize();
+
+    /**
+     * Production source root.
+     * null → {@code MODULE/src/main/java}
+     */
+    public static final Path MAIN_SOURCES = null;
+
+    /**
+     * Test source root (skeletons written here).
+     * null → {@code MODULE/src/test/java}
+     */
+    public static final Path TEST_SOURCES = null;
+
+    public static final String TEST_NAME_SUFFIX = &quot;Test&quot;;
+
+    /**
+     * {@code true}: inject step removes dependency-graph markers from source (no inject).
+     * {@code false}: inject step writes dependency-graph markers into source.
+     */
+    public static final boolean STRIP = false;
+
+    /**
+     * {@code false} (default): generated stubs cover only methods declared by project classes;
+     * third-party/JDK collaborators are mocked but left unstubbed.
+     * {@code true}: stub every method of a mocked collaborator, including third-party/JDK.
+     */
+    public static final boolean STUB_THIRD_PARTY = false;
+
+    /** Call-chain recursion depth (ROADMAP tool 2). */
+    public static final int CALL_CHAIN_MAX_DEPTH = 3;
+
+    /** Cap edges emitted per method in call-chain. */
+    public static final int CALL_CHAIN_MAX_EDGES = 40;
+
+    private Config() {}
+
+    /**
+     * Optional method targets: {@code fqcn} or {@code fqcn#method} per line.
+     * If missing/empty, falls back to all public methods of {@link #classesList()}.
+     */
+    public static Path methodsList() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;methods.txt&quot;);
+    }
+
+    /** Method targets for call-chain / data-flow; defaults to classes.txt FQCNs. */
+    public static List&lt;String&gt; readMethodTargets() throws Exception {
+        Path list = methodsList();
+        if (Files.isRegularFile(list)) {
+            List&lt;String&gt; lines = Files.readAllLines(list).stream()
+                    .map(String::trim)
+                    .filter(line -&gt; !line.isEmpty() &amp;&amp; !line.startsWith(&quot;#&quot;))
+                    .toList();
+            if (!lines.isEmpty()) {
+                return lines;
+            }
+        }
+        return readClasses();
+    }
+
+    /** {@code MODULE/testgen/classes.txt} */
+    public static Path classesList() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;classes.txt&quot;);
+    }
+
+    /** {@code MODULE/testgen/reports} */
+    public static Path reportsDir() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;reports&quot;);
+    }
+
+    public static Path mainSourceRoot() {
+        return MAIN_SOURCES != null
+                ? MAIN_SOURCES.toAbsolutePath().normalize()
+                : MODULE.resolve(&quot;src&quot;).resolve(&quot;main&quot;).resolve(&quot;java&quot;);
+    }
+
+    public static Path testSourceRoot() {
+        return TEST_SOURCES != null
+                ? TEST_SOURCES.toAbsolutePath().normalize()
+                : MODULE.resolve(&quot;src&quot;).resolve(&quot;test&quot;).resolve(&quot;java&quot;);
+    }
+
+    public static List&lt;String&gt; readClasses() throws Exception {
+        Path list = classesList();
+        if (!Files.isRegularFile(list)) {
+            throw new IllegalStateException(&quot;classes list not found: &quot; + list);
+        }
+        return Files.readAllLines(list).stream()
+                .map(String::trim)
+                .filter(line -&gt; !line.isEmpty() &amp;&amp; !line.startsWith(&quot;#&quot;))
+                .toList();
+    }
+}
+</pre>
+<h4>DepGraphScanner.java</h4>
+<pre>package com.testgen;
+
+import com.config.Config;
+
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
+import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
+
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Parameter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/**
+ * Step 1: scan SUTs → write per-class dependency graphs (no source injection).
+ *
+ * hop 2 extension: after the SUT's own inventory, every direct collaborator that is a
+ * project class (source under MAIN_SOURCES) gets its own inventory section — fields,
+ * constructors, public methods and *their* hop-1 uses. That surfaces the collaborators'
+ * internal dependencies (collaborators-of-collaborators) without full transitive blowup.
+ *
+ * Output: {@code MODULE/testgen/reports/{Fqcn}.md}
+ */
+public final class DepGraphScanner {
+
+    /** Cap call/new sites kept per method to keep the injected comments a manageable size. */
+    static final int MAX_USES_PER_METHOD = 20;
+
+    /** Collaborator sections per SUT report. Integer.MAX_VALUE = no effective cap (building uncapped for now). */
+    static final int MAX_COLLABORATORS = Integer.MAX_VALUE;
+
+    private DepGraphScanner() {}
+
+    public static void run() throws Exception {
+        Path outDir = Config.reportsDir();
+        Files.createDirectories(outDir);
+        List&lt;String&gt; classes = Config.readClasses();
+        Path mainSourceRoot = Config.mainSourceRoot();
+
+        int wrote = 0;
+        for (String fqcn : classes) {
+            try {
+                Class&lt;?&gt; sut = Class.forName(fqcn, false, DepGraphScanner.class.getClassLoader());
+                String markdown = scan(sut, mainSourceRoot);
+                Path out = outDir.resolve(fqcn + &quot;.md&quot;);
+                Files.writeString(out, markdown);
+                System.out.println(&quot;Wrote &quot; + out);
+                wrote++;
+            } catch (Throwable t) {   // isolate per-SUT: a bad entry must not abort the whole scan
+                System.out.println(&quot;SKIP scan &quot; + fqcn + &quot; -&gt; &quot; + t.getClass().getSimpleName()
+                        + &quot;: &quot; + t.getMessage());
+            }
+        }
+        System.out.println(&quot;Done. &quot; + wrote + &quot; graph(s) in &quot; + outDir.toAbsolutePath());
+    }
+
+    static String scan(Class&lt;?&gt; sut, Path mainSourceRoot) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append(&quot;# testgen-dependencies\n&quot;);
+        sb.append(&quot;sut: &quot;).append(sut.getName()).append('\n');
+        sb.append(&quot;hop: 2\n&quot;);
+        sb.append(&quot;staticOnly: &quot;).append(isStaticOnly(sut)).append('\n');
+        sb.append('\n');
+
+        Optional&lt;CompilationUnit&gt; cu = emitClassDetail(sb, sut, mainSourceRoot, &quot;##&quot;, &quot;###&quot;);
+
+        List&lt;Class&lt;?&gt;&gt; collaborators = directCollaborators(sut, cu, mainSourceRoot);
+        sb.append(&quot;## collaborators (hop 2)\n&quot;);
+        if (collaborators.isEmpty()) {
+            sb.append(&quot;- (none in project sources)\n\n&quot;);
+        } else {
+            sb.append(&quot;- direct project-class collaborators of the SUT, each with its OWN direct\n&quot;);
+            sb.append(&quot;  dependencies (fields / ctors / hop-1 uses). JDK + third-party types excluded.\n\n&quot;);
+            for (Class&lt;?&gt; collab : collaborators) {
+                sb.append(&quot;### collaborator: &quot;).append(collab.getName()).append('\n');
+                sb.append(&quot;staticOnly: &quot;).append(isStaticOnly(collab)).append(&quot;\n\n&quot;);
+                emitClassDetail(sb, collab, mainSourceRoot, &quot;####&quot;, &quot;#####&quot;);
+                // hop-2 proper: the collaborator's OWN collaborators via the same source-based
+                // extraction (static receivers, generic args, supertypes) — not just erased fields.
+                List&lt;Class&lt;?&gt;&gt; sub = directCollaborators(collab, parseSource(collab, mainSourceRoot), mainSourceRoot);
+                sub.remove(sut);
+                if (!sub.isEmpty()) {
+                    sb.append(&quot;#### collaborators of &quot;).append(collab.getSimpleName())
+                            .append(&quot; (field/new/static/generic/supertype)\n&quot;);
+                    for (Class&lt;?&gt; sc : sub) {
+                        sb.append(&quot;- &quot;).append(sc.getName()).append('\n');
+                    }
+                    sb.append('\n');
+                }
+            }
+        }
+
+        sb.append(&quot;## notes\n&quot;);
+        sb.append(&quot;- hop 1 = direct calls / new in method body (AST); not transitive.\n&quot;);
+        sb.append(&quot;- hop 2 = each direct collaborator's own hop-1 inventory (collaborators-of-collaborators).\n&quot;);
+        sb.append(&quot;- collaborators = field/ctor/param/return types + new'd types + static-call receivers, project sources only; capped by MAX_COLLABORATORS.\n&quot;);
+        sb.append(&quot;- Instancio fills concrete fields but leaves interface/abstract fields null; static initializers still run at class load.\n&quot;);
+        sb.append(&quot;- Unchecked exceptions (NPE, IAE) are not in 'throwsChecked' — they surface only at runtime, not from the signature.\n&quot;);
+        sb.append(&quot;- Known limits: reflection/dynamic dispatch, DI wiring, runtime config,\n&quot;);
+        sb.append(&quot;  polymorphic targets, proxies/mocks are NOT resolved here.\n&quot;);
+        return sb.toString();
+    }
+
+    /**
+     * Emits fields / constructors / methods (+hop-1 uses) for one class at the given
+     * heading levels. Returns the parsed CompilationUnit if the source was found.
+     */
+    private static Optional&lt;CompilationUnit&gt; emitClassDetail(StringBuilder sb, Class&lt;?&gt; cls,
+            Path mainSourceRoot, String h2, String h3) {
+        sb.append(h2).append(&quot; fields\n&quot;);
+        List&lt;Field&gt; fieldsList = instanceAndStaticFields(cls);
+        for (Field f : fieldsList) {
+            try {
+                boolean iface = f.getType().isInterface();
+                String kind = Modifier.isStatic(f.getModifiers()) ? &quot;static&quot; : &quot;instance&quot;;
+                String tip = iface ? &quot;iface → mock&quot; : &quot;concrete → Instancio/null-risk&quot;;
+                sb.append(&quot;- &quot;).append(f.getName()).append(&quot;: &quot;).append(typeLabel(f.getType()))
+                        .append(&quot;  [&quot;).append(kind).append(&quot;; &quot;).append(tip).append(&quot;]\n&quot;);
+            } catch (Throwable t) {
+                sb.append(&quot;- &quot;).append(f.getName()).append(&quot;: (UNRESOLVED: &quot;)
+                        .append(t.getClass().getSimpleName()).append(&quot;)\n&quot;);
+            }
+        }
+        if (fieldsList.isEmpty()) {
+            sb.append(&quot;- (none)\n&quot;);
+        }
+        sb.append('\n');
+
+        sb.append(h2).append(&quot; constructors\n&quot;);
+        Constructor&lt;?&gt;[] ctors = cls.getDeclaredConstructors();
+        Arrays.sort(ctors, Comparator.comparingInt((Constructor&lt;?&gt; c) -&gt; c.getParameterCount()).reversed());
+        boolean anyCtor = false;
+        for (Constructor&lt;?&gt; c : ctors) {
+            if (!Modifier.isPublic(c.getModifiers()) &amp;&amp; !Modifier.isProtected(c.getModifiers())) {
+                continue;
+            }
+            sb.append(&quot;- &quot;).append(ctorSig(c)).append('\n');
+            anyCtor = true;
+        }
+        if (!anyCtor) {
+            sb.append(&quot;- (none)\n&quot;);
+        }
+        sb.append('\n');
+
+        sb.append(h2).append(&quot; methods\n&quot;);
+        Optional&lt;CompilationUnit&gt; cu = parseSource(cls, mainSourceRoot);
+        List&lt;Method&gt; methods;
+        try {
+            methods = publicMethods(cls);
+        } catch (Throwable t) {
+            methods = List.of();
+            sb.append(&quot;- (methods partially unresolved: &quot;).append(t.getClass().getSimpleName()).append(&quot;)\n&quot;);
+        }
+        if (methods.isEmpty()) {
+            sb.append(&quot;- (none)\n&quot;);
+        }
+        for (Method m : methods) {
+            sb.append(h3).append(' ').append(methodKey(m)).append('\n');
+            sb.append(&quot;- static: &quot;).append(Modifier.isStatic(m.getModifiers())).append('\n');
+            sb.append(&quot;- returns: &quot;).append(typeLabel(m.getReturnType())).append('\n');
+            Class&lt;?&gt;[] checked = m.getExceptionTypes();
+            if (checked.length &gt; 0) {
+                sb.append(&quot;- throwsChecked: &quot;)
+                        .append(Arrays.stream(checked).map(DepGraphScanner::typeLabel)
+                                .collect(Collectors.joining(&quot;, &quot;)))
+                        .append('\n');
+            } else {
+                sb.append(&quot;- throwsChecked: (none)\n&quot;);
+            }
+            sb.append(&quot;- params:\n&quot;);
+            if (m.getParameterCount() == 0) {
+                sb.append(&quot;  - (none)\n&quot;);
+            } else {
+                for (Parameter p : m.getParameters()) {
+                    boolean iface = p.getType().isInterface();
+                    sb.append(&quot;  - &quot;).append(p.getName()).append(&quot;: &quot;).append(typeLabel(p.getType()))
+                            .append(iface ? &quot;  [iface → mock]\n&quot; : &quot;\n&quot;);
+                }
+            }
+
+            List&lt;String&gt; uses = cu.map(unit -&gt; hop1Uses(unit, cls.getSimpleName(), m))
+                    .orElse(List.of(&quot;(source not found — inventory only)&quot;));
+            sb.append(&quot;- uses (hop 1):\n&quot;);
+            if (uses.isEmpty()) {
+                sb.append(&quot;  - (none found)\n&quot;);
+            } else {
+                for (String u : uses) {
+                    sb.append(&quot;  - &quot;).append(u).append('\n');
+                }
+            }
+            sb.append('\n');
+        }
+        return cu;
+    }
+
+    /**
+     * Direct collaborators of the SUT: declared field types, constructor parameter
+     * types, public method parameter/return types, and types instantiated via
+     * {@code new} in method bodies (AST names resolved against the CU's package and
+     * imports). Kept only if the type's source exists under the main source root
+     * (project class), is not the SUT itself, and within {@link #MAX_COLLABORATORS}.
+     */
+    private static List&lt;Class&lt;?&gt;&gt; directCollaborators(Class&lt;?&gt; sut, Optional&lt;CompilationUnit&gt; cu,
+            Path mainSourceRoot) {
+        LinkedHashSet&lt;Class&lt;?&gt;&gt; out = new LinkedHashSet&lt;&gt;();
+
+        for (Field f : instanceAndStaticFields(sut)) {
+            try {
+                addCollaborator(out, baseType(f.getType()), sut, mainSourceRoot);
+            } catch (Throwable ignored) { }
+        }
+        for (Constructor&lt;?&gt; c : sut.getDeclaredConstructors()) {
+            try {
+                for (Class&lt;?&gt; p : c.getParameterTypes()) {
+                    addCollaborator(out, baseType(p), sut, mainSourceRoot);
+                }
+            } catch (Throwable ignored) { }
+        }
+        try {
+            for (Method m : publicMethods(sut)) {
+                for (Class&lt;?&gt; p : m.getParameterTypes()) {
+                    addCollaborator(out, baseType(p), sut, mainSourceRoot);
+                }
+                addCollaborator(out, baseType(m.getReturnType()), sut, mainSourceRoot);
+            }
+        } catch (Throwable ignored) { }
+
+        // Types instantiated in method bodies: `new X(...)` — AST simple names resolved
+        // against the CU's own package, then explicit imports.
+        if (cu.isPresent()) {
+            LinkedHashSet&lt;String&gt; newedNames = new LinkedHashSet&lt;&gt;();
+            LinkedHashSet&lt;String&gt; staticReceivers = new LinkedHashSet&lt;&gt;();
+            LinkedHashSet&lt;String&gt; typeRefs = new LinkedHashSet&lt;&gt;();
+            cu.get().accept(new VoidVisitorAdapter&lt;Void&gt;() {
+                @Override
+                public void visit(ObjectCreationExpr n, Void arg) {
+                    super.visit(n, arg);
+                    newedNames.add(n.getType().getNameAsString());
+                }
+                @Override
+                public void visit(MethodCallExpr n, Void arg) {
+                    super.visit(n, arg);
+                    n.getScope().ifPresent(s -&gt; {
+                        if (s instanceof com.github.javaparser.ast.expr.NameExpr ne) {
+                            String nm = ne.getNameAsString();
+                            if (!nm.isEmpty() &amp;&amp; Character.isUpperCase(nm.charAt(0))) {
+                                staticReceivers.add(nm);   // static-class receiver, e.g. Util.foo()
+                            }
+                        }
+                    });
+                }
+                @Override
+                public void visit(com.github.javaparser.ast.type.ClassOrInterfaceType n, Void arg) {
+                    super.visit(n, arg);
+                    typeRefs.add(n.getNameAsString());   // generic args, extends/implements, all type refs
+                }
+            }, null);
+            String pkg = cu.get().getPackageDeclaration()
+                    .map(pd -&gt; pd.getNameAsString()).orElse(&quot;&quot;);
+            List&lt;String&gt; imports = cu.get().getImports().stream()
+                    .filter(i -&gt; !i.isAsterisk() &amp;&amp; !i.isStatic())
+                    .map(i -&gt; i.getNameAsString())
+                    .toList();
+            for (String simple : newedNames) {
+                Class&lt;?&gt; resolved = resolveSimpleName(simple, pkg, imports);
+                if (resolved != null) {
+                    addCollaborator(out, resolved, sut, mainSourceRoot);
+                }
+            }
+            for (String simple : staticReceivers) {
+                Class&lt;?&gt; resolved = resolveSimpleName(simple, pkg, imports);
+                if (resolved != null) {
+                    addCollaborator(out, resolved, sut, mainSourceRoot);
+                }
+            }
+            for (String simple : typeRefs) {
+                Class&lt;?&gt; resolved = resolveSimpleName(simple, pkg, imports);
+                if (resolved != null) {
+                    addCollaborator(out, resolved, sut, mainSourceRoot);
+                }
+            }
+        }
+        return new ArrayList&lt;&gt;(out);
+    }
+
+    private static void addCollaborator(Set&lt;Class&lt;?&gt;&gt; out, Class&lt;?&gt; candidate, Class&lt;?&gt; sut,
+            Path mainSourceRoot) {
+        if (candidate == null || candidate == sut || candidate.isPrimitive()) {
+            return;
+        }
+        if (out.size() &gt;= MAX_COLLABORATORS) {
+            return;
+        }
+        if (!isProjectClass(candidate, mainSourceRoot)) {
+            return;
+        }
+        out.add(candidate);
+    }
+
+    /** A collaborator counts as a project class iff its .java source exists under the main root. */
+    private static boolean isProjectClass(Class&lt;?&gt; type, Path mainSourceRoot) {
+        if (type.getPackageName().startsWith(&quot;java.&quot;) || type.getPackageName().startsWith(&quot;javax.&quot;)) {
+            return false;
+        }
+        Path src = mainSourceRoot
+                .resolve(type.getPackageName().replace('.', '/'))
+                .resolve(type.getSimpleName() + &quot;.java&quot;);
+        return Files.isRegularFile(src);
+    }
+
+    private static Class&lt;?&gt; resolveSimpleName(String simple, String pkg, List&lt;String&gt; imports) {
+        for (String imp : imports) {
+            if (imp.endsWith(&quot;.&quot; + simple)) {
+                return forNameQuiet(imp);
+            }
+        }
+        if (!pkg.isEmpty()) {
+            Class&lt;?&gt; samePkg = forNameQuiet(pkg + &quot;.&quot; + simple);
+            if (samePkg != null) {
+                return samePkg;
+            }
+        }
+        return forNameQuiet(simple);
+    }
+
+    private static Class&lt;?&gt; forNameQuiet(String fqcn) {
+        try {
+            return Class.forName(fqcn, false, DepGraphScanner.class.getClassLoader());
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static Class&lt;?&gt; baseType(Class&lt;?&gt; type) {
+        Class&lt;?&gt; cur = type;
+        while (cur != null &amp;&amp; cur.isArray()) {
+            cur = cur.getComponentType();
+        }
+        return cur;
+    }
+
+    private static Optional&lt;CompilationUnit&gt; parseSource(Class&lt;?&gt; sut, Path mainSourceRoot) {
+        Path src = mainSourceRoot
+                .resolve(sut.getPackageName().replace('.', '/'))
+                .resolve(sut.getSimpleName() + &quot;.java&quot;);
+        if (!Files.isRegularFile(src)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(StaticJavaParser.parse(src));
+        } catch (Exception e) {
+            System.err.println(&quot;WARN parse failed &quot; + src + &quot;: &quot; + e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private static List&lt;String&gt; hop1Uses(CompilationUnit cu, String simpleName, Method method) {
+        Optional&lt;MethodDeclaration&gt; md = findMethod(cu, simpleName, method);
+        if (md.isEmpty()) {
+            return List.of(&quot;(no method body — interface/abstract, or source not parsed)&quot;);
+        }
+        LinkedHashSet&lt;String&gt; uses = new LinkedHashSet&lt;&gt;();
+        md.get().accept(new VoidVisitorAdapter&lt;Void&gt;() {
+            @Override
+            public void visit(MethodCallExpr n, Void arg) {
+                super.visit(n, arg);
+                String name = n.getNameAsString();
+                if (isNoise(name)) {
+                    return;
+                }
+                String scope = n.getScope().map(Object::toString).orElse(&quot;this&quot;);
+                if (isNoiseScope(scope)) {
+                    return;
+                }
+                uses.add(scope + &quot;.&quot; + name + &quot;(&quot; + n.getArguments().size() + &quot;)&quot;);
+            }
+
+            @Override
+            public void visit(ObjectCreationExpr n, Void arg) {
+                super.visit(n, arg);
+                uses.add(&quot;new &quot; + n.getType().asString() + &quot;(&quot; + n.getArguments().size() + &quot;)&quot;);
+            }
+        }, null);
+
+        List&lt;String&gt; out = new ArrayList&lt;&gt;(uses);
+        if (out.size() &gt; MAX_USES_PER_METHOD) {
+            return new ArrayList&lt;&gt;(out.subList(0, MAX_USES_PER_METHOD));
+        }
+        return out;
+    }
+
+    private static Optional&lt;MethodDeclaration&gt; findMethod(CompilationUnit cu, String simpleName, Method method) {
+        Optional&lt;ClassOrInterfaceDeclaration&gt; type = cu.getClassByName(simpleName);
+        if (type.isEmpty()) {
+            return Optional.empty();
+        }
+        List&lt;MethodDeclaration&gt; candidates = type.get().getMethodsByName(method.getName());
+        for (MethodDeclaration md : candidates) {
+            if (md.getParameters().size() != method.getParameterCount()) {
+                continue;
+            }
+            if (Modifier.isStatic(method.getModifiers()) != md.isStatic()) {
+                continue;
+            }
+            return Optional.of(md);
+        }
+        return candidates.stream().findFirst();
+    }
+
+    private static boolean isNoise(String methodName) {
+        return Set.of(&quot;equals&quot;, &quot;hashCode&quot;, &quot;toString&quot;, &quot;getClass&quot;, &quot;valueOf&quot;,
+                &quot;requireNonNull&quot;, &quot;requireNonBlank&quot;).contains(methodName);
+    }
+
+    private static boolean isNoiseScope(String scope) {
+        return scope.startsWith(&quot;Objects&quot;)
+                || scope.startsWith(&quot;System&quot;)
+                || scope.startsWith(&quot;Ids&quot;)
+                || scope.equals(&quot;Math&quot;);
+    }
+
+    private static List&lt;Field&gt; instanceAndStaticFields(Class&lt;?&gt; sut) {
+        List&lt;Field&gt; out = new ArrayList&lt;&gt;();
+        Class&lt;?&gt; cur = sut;
+        try {
+            // BUG-2b: stop at the JDK boundary — don't pull inherited fields out of JDK types
+            // (e.g. java.lang.Enum's name/ordinal, java.lang.Record) which are not the SUT's own state.
+            while (cur != null &amp;&amp; cur != Object.class &amp;&amp; !cur.getName().startsWith(&quot;java.&quot;)) {
+                for (Field f : cur.getDeclaredFields()) {
+                    if (f.isSynthetic()) {
+                        continue;
+                    }
+                    out.add(f);
+                }
+                cur = cur.getSuperclass();
+            }
+        } catch (Throwable ignored) {
+            // stop climbing on an unresolvable parent
+        }
+        return out;
+    }
+
+    private static List&lt;Method&gt; publicMethods(Class&lt;?&gt; sut) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        for (Method m : sut.getDeclaredMethods()) {
+            if (!Modifier.isPublic(m.getModifiers()) || m.isSynthetic() || m.isBridge()) {
+                continue;
+            }
+            String n = m.getName();
+            if (n.equals(&quot;equals&quot;) || n.equals(&quot;hashCode&quot;) || n.equals(&quot;toString&quot;)) {
+                continue;
+            }
+            out.add(m);
+        }
+        if (filterInstance(sut.getDeclaredMethods()).isEmpty()
+                || onlyAccessors(filterInstance(sut.getDeclaredMethods()))) {
+            Class&lt;?&gt; parent = sut.getSuperclass();
+            if (parent != null &amp;&amp; parent != Object.class) {
+                for (Method m : parent.getDeclaredMethods()) {
+                    if (Modifier.isPublic(m.getModifiers()) &amp;&amp; !Modifier.isStatic(m.getModifiers())
+                            &amp;&amp; !m.isSynthetic() &amp;&amp; !m.isBridge()) {
+                        out.add(m);
+                    }
+                }
+            }
+        }
+        LinkedHashSet&lt;String&gt; seen = new LinkedHashSet&lt;&gt;();
+        List&lt;Method&gt; deduped = new ArrayList&lt;&gt;();
+        for (Method m : out) {
+            String key = methodKey(m);
+            if (seen.add(key)) {
+                deduped.add(m);
+            }
+        }
+        deduped.sort(Comparator.comparing(DepGraphScanner::methodKey));
+        return deduped;
+    }
+
+    private static List&lt;Method&gt; filterInstance(Method[] methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        for (Method m : methods) {
+            if (Modifier.isPublic(m.getModifiers()) &amp;&amp; !Modifier.isStatic(m.getModifiers())
+                    &amp;&amp; !m.isSynthetic() &amp;&amp; !m.isBridge()) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static boolean onlyAccessors(List&lt;Method&gt; methods) {
+        if (methods.isEmpty()) {
+            return true;
+        }
+        for (Method m : methods) {
+            if (m.getParameterCount() != 0 || m.getReturnType() == void.class) {
+                return false;
+            }
+            String n = m.getName();
+            if (!n.startsWith(&quot;get&quot;) &amp;&amp; !n.startsWith(&quot;is&quot;)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isStaticOnly(Class&lt;?&gt; sut) {
+        boolean anyInstance = false;
+        boolean anyStatic = false;
+        Method[] declared;
+        try {
+            declared = sut.getDeclaredMethods();
+        } catch (Throwable t) {
+            return false;
+        }
+        for (Method m : declared) {
+            if (!Modifier.isPublic(m.getModifiers()) || m.isSynthetic() || m.isBridge()) {
+                continue;
+            }
+            if (Modifier.isStatic(m.getModifiers())) {
+                anyStatic = true;
+            } else {
+                anyInstance = true;
+            }
+        }
+        return !anyInstance &amp;&amp; anyStatic;
+    }
+
+    private static String methodKey(Method m) {
+        String params = Arrays.stream(m.getParameterTypes())
+                .map(DepGraphScanner::typeLabel)
+                .collect(Collectors.joining(&quot;, &quot;));
+        return m.getName() + &quot;(&quot; + params + &quot;)&quot;;
+    }
+
+    private static String ctorSig(Constructor&lt;?&gt; c) {
+        String params = Arrays.stream(c.getParameterTypes())
+                .map(DepGraphScanner::typeLabel)
+                .collect(Collectors.joining(&quot;, &quot;));
+        return c.getDeclaringClass().getSimpleName() + &quot;(&quot; + params + &quot;)&quot;;
+    }
+
+    private static String typeLabel(Class&lt;?&gt; type) {
+        if (type.isArray()) {
+            return typeLabel(type.getComponentType()) + &quot;[]&quot;;
+        }
+        return type.getName();
+    }
+}
+</pre>
+<h4>CallChainScanner.java</h4>
+<pre>package com.testgen;
+
+import com.config.Config;
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
+import com.github.javaparser.ast.expr.VariableDeclarationExpr;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * ROADMAP tool 2: static call-chain from SUT methods (JavaParser, source-only).
+ * Output: {@code MODULE/testgen/reports/callchain/{Fqcn}__{method}.md}
+ */
+public final class CallChainScanner {
+
+    private CallChainScanner() {}
+
+    public static void run() throws Exception {
+        Path outDir = Config.reportsDir().resolve(&quot;callchain&quot;);
+        Files.createDirectories(outDir);
+        Path root = Config.mainSourceRoot();
+        int maxDepth = Math.max(1, Config.CALL_CHAIN_MAX_DEPTH);
+        int wrote = 0;
+        for (String target : Config.readMethodTargets()) {
+            try {
+                String fqcn = target;
+                String method = null;
+                int hash = target.indexOf('#');
+                if (hash &gt; 0) {
+                    fqcn = target.substring(0, hash).trim();
+                    method = target.substring(hash + 1).trim();
+                }
+                if (method == null || method.isBlank()) {
+                    java.util.Map&lt;String,Integer&gt; seen = new java.util.HashMap&lt;&gt;();
+                    for (String m : listPublicMethods(root, fqcn)) {
+                        int n = seen.merge(m, 1, Integer::sum);
+                        String fileKey = (n == 1) ? m : m + &quot;_&quot; + n;   // BUG-1: overloads must not overwrite
+                        wrote += writeOne(outDir, root, fqcn, m, fileKey, maxDepth) ? 1 : 0;
+                    }
+                } else {
+                    wrote += writeOne(outDir, root, fqcn, method, method, maxDepth) ? 1 : 0;
+                }
+            } catch (Throwable t) {   // isolate per-target: one bad target must not abort the batch
+                System.out.println(&quot;SKIP callchain &quot; + target + &quot; -&gt; &quot; + t.getClass().getSimpleName()
+                        + &quot;: &quot; + t.getMessage());
+            }
+        }
+        System.out.println(&quot;CallChain done. &quot; + wrote + &quot; report(s) in &quot; + outDir.toAbsolutePath());
+    }
+
+    private static boolean writeOne(Path outDir, Path root, String fqcn, String method, String fileKey, int maxDepth)
+            throws Exception {
+        String md = analyze(root, fqcn, method, maxDepth);
+        Path out = outDir.resolve(fqcn + &quot;__&quot; + fileKey + &quot;.md&quot;);   // BUG-1: fileKey disambiguates overloads
+        Files.writeString(out, md);
+        System.out.println(&quot;Wrote &quot; + out);
+        return true;
+    }
+
+    public static String analyze(Path mainSourceRoot, String fqcn, String method, int maxDepth) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append(&quot;# callchain\n&quot;);
+        sb.append(&quot;sut: &quot;).append(fqcn).append('#').append(method).append('\n');
+        sb.append(&quot;maxDepth: &quot;).append(maxDepth).append('\n');
+        sb.append('\n');
+        List&lt;String&gt; lines = new ArrayList&lt;&gt;();
+        walk(mainSourceRoot, fqcn, method, 0, maxDepth, new LinkedHashSet&lt;&gt;(), lines, &quot;&quot;);
+        if (lines.isEmpty()) {
+            sb.append(&quot;- (no outbound calls found or source missing)\n&quot;);
+        } else {
+            for (String line : lines) {
+                sb.append(line).append('\n');
+            }
+        }
+        sb.append('\n');
+        sb.append(&quot;## notes\n&quot;);
+        sb.append(&quot;- Static only; no reflection/DI/poly resolution.\n&quot;);
+        return sb.toString();
+    }
+
+    private static void walk(
+            Path root,
+            String fqcn,
+            String method,
+            int depth,
+            int maxDepth,
+            Set&lt;String&gt; stack,
+            List&lt;String&gt; out,
+            String indent) throws Exception {
+        if (depth &gt;= maxDepth) {
+            return;
+        }
+        String key = fqcn + &quot;#&quot; + method;
+        if (!stack.add(key)) {
+            out.add(indent + &quot;- (cycle &quot; + key + &quot;)&quot;);
+            return;
+        }
+        Path src = sourcePath(root, fqcn);
+        if (!Files.isRegularFile(src)) {
+            out.add(indent + &quot;- (no source &quot; + fqcn + &quot;)&quot;);
+            stack.remove(key);
+            return;
+        }
+        CompilationUnit cu = StaticJavaParser.parse(src);
+        Optional&lt;MethodDeclaration&gt; md = findMethod(cu, simpleName(fqcn), method);
+        if (md.isEmpty()) {
+            out.add(indent + &quot;- (method not found &quot; + key + &quot;)&quot;);
+            stack.remove(key);
+            return;
+        }
+        String pkg = cu.getPackageDeclaration().map(p -&gt; p.getNameAsString()).orElse(&quot;&quot;);
+        Map&lt;String, String&gt; fieldTypes = fieldTypes(cu, simpleName(fqcn));
+        Map&lt;String, String&gt; localTypes = localVarTypes(md.get(), cu, pkg);
+        for (ObjectCreationExpr oce : md.get().findAll(ObjectCreationExpr.class)) {
+            String t = resolveTypeName(cu, pkg, oce.getType().getNameAsString());
+            String loc = src.getFileName() + &quot;:&quot; + oce.getBegin().map(p -&gt; p.line).orElse(-1);
+            out.add(indent + &quot;- &quot; + simpleName(fqcn) + &quot;.&quot; + method + &quot; -&gt; new &quot; + simpleName(t) + &quot; (&quot; + loc + &quot;)&quot;);
+        }
+        int n = 0;
+        for (MethodCallExpr call : md.get().findAll(MethodCallExpr.class)) {
+            if (n++ &gt;= Config.CALL_CHAIN_MAX_EDGES) {
+                out.add(indent + &quot;- … capped&quot;);
+                break;
+            }
+            String calleeName = call.getNameAsString();
+            String scopeType = resolveScopeType(call, root, fieldTypes, localTypes, cu, pkg, fqcn);
+            String loc = src.getFileName() + &quot;:&quot; + call.getBegin().map(p -&gt; p.line).orElse(-1);
+            String edge = simpleName(fqcn) + &quot;.&quot; + method + &quot; -&gt; &quot;
+                    + (scopeType != null ? simpleName(scopeType) + &quot;.&quot; : &quot;&quot;)
+                    + calleeName + &quot; (&quot; + loc + &quot;)&quot;;
+            out.add(indent + &quot;- &quot; + edge);
+            if (scopeType != null &amp;&amp; !scopeType.startsWith(&quot;java.&quot;) &amp;&amp; depth + 1 &lt; maxDepth) {
+                walk(root, scopeType, calleeName, depth + 1, maxDepth, stack, out, indent + &quot;  &quot;);
+            }
+        }
+        stack.remove(key);
+    }
+
+    private static String resolveScopeType(MethodCallExpr call, Path root, Map&lt;String, String&gt; fieldTypes,
+            Map&lt;String, String&gt; localTypes, CompilationUnit cu, String pkg, String ownerFqcn) {
+        Optional&lt;Expression&gt; scope = call.getScope();
+        if (scope.isEmpty()) {
+            return ownerFqcn; // same class / this
+        }
+        Expression s = scope.get();
+        if (s instanceof NameExpr ne) {
+            String n = ne.getNameAsString();
+            if (&quot;this&quot;.equals(n)) {
+                return ownerFqcn;
+            }
+            if (localTypes.containsKey(n)) {
+                return localTypes.get(n);   // local variable / parameter receiver
+            }
+            if (fieldTypes.containsKey(n)) {
+                return fieldTypes.get(n);
+            }
+            if (!n.isEmpty() &amp;&amp; Character.isUpperCase(n.charAt(0))) {
+                return resolveTypeName(cu, pkg, n);   // static-class receiver
+            }
+            return null;
+        }
+        if (s instanceof FieldAccessExpr fa &amp;&amp; &quot;this&quot;.equals(fa.getScope().toString())) {
+            return fieldTypes.get(fa.getNameAsString());
+        }
+        if (s instanceof MethodCallExpr inner) {
+            // chained call a().b(): resolve inner receiver, then look up inner's DECLARED return type
+            String innerOwner = resolveScopeType(inner, root, fieldTypes, localTypes, cu, pkg, ownerFqcn);
+            if (innerOwner != null) {
+                return returnTypeOf(root, innerOwner, inner.getNameAsString());
+            }
+        }
+        return null;
+    }
+
+    /** Declared return type of ownerFqcn#methodName, resolved to a FQN (deterministic, from source). */
+    private static String returnTypeOf(Path root, String ownerFqcn, String methodName) {
+        try {
+            Path src = sourcePath(root, ownerFqcn);
+            if (!Files.isRegularFile(src)) {
+                return null;
+            }
+            CompilationUnit ocu = StaticJavaParser.parse(src);
+            String opkg = ocu.getPackageDeclaration().map(p -&gt; p.getNameAsString()).orElse(&quot;&quot;);
+            for (MethodDeclaration m : ocu.findAll(MethodDeclaration.class)) {
+                if (m.getNameAsString().equals(methodName)) {
+                    String rt = m.getType().asString();
+                    return &quot;void&quot;.equals(rt) ? null : resolveTypeName(ocu, opkg, rt);
+                }
+            }
+        } catch (Throwable ignored) { }
+        return null;
+    }
+
+    /** Local variable + parameter names -&gt; resolved (erased) type, for receiver resolution. */
+    private static Map&lt;String, String&gt; localVarTypes(MethodDeclaration md, CompilationUnit cu, String pkg) {
+        Map&lt;String, String&gt; map = new LinkedHashMap&lt;&gt;();
+        for (VariableDeclarationExpr v : md.findAll(VariableDeclarationExpr.class)) {
+            v.getVariables().forEach(var -&gt; {
+                String t = var.getType().asString().replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).trim();
+                if (!t.isEmpty() &amp;&amp; Character.isJavaIdentifierStart(t.charAt(0))) {
+                    map.put(var.getNameAsString(), resolveTypeName(cu, pkg, t));
+                }
+            });
+        }
+        md.getParameters().forEach(p -&gt; {
+            String t = p.getType().asString().replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).trim();
+            if (!t.isEmpty() &amp;&amp; Character.isJavaIdentifierStart(t.charAt(0))) {
+                map.put(p.getNameAsString(), resolveTypeName(cu, pkg, t));
+            }
+        });
+        return map;
+    }
+
+    /** Resolve a simple type name to a FQN via imports, then java.lang, else same package. */
+    private static String resolveTypeName(CompilationUnit cu, String pkg, String simple) {
+        String bare = simple.replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).replace(&quot;[]&quot;, &quot;&quot;).trim();
+        if (bare.contains(&quot;.&quot;)) {
+            return bare;
+        }
+        for (ImportDeclaration imp : cu.getImports()) {
+            if (!imp.isAsterisk() &amp;&amp; imp.getNameAsString().endsWith(&quot;.&quot; + bare)) {
+                return imp.getNameAsString();
+            }
+        }
+        if (isJavaLang(bare)) {
+            return &quot;java.lang.&quot; + bare;
+        }
+        return (bare.isEmpty() || pkg.isEmpty()) ? bare : pkg + &quot;.&quot; + bare;
+    }
+
+    private static boolean isJavaLang(String simple) {
+        try {
+            Class.forName(&quot;java.lang.&quot; + simple);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static Map&lt;String, String&gt; fieldTypes(CompilationUnit cu, String simple) {
+        Map&lt;String, String&gt; map = new LinkedHashMap&lt;&gt;();
+        for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            if (!c.getNameAsString().equals(simple)) {
+                continue;
+            }
+            c.getFields().forEach(f -&gt; f.getVariables().forEach(v -&gt; {
+                String type = f.getElementType().asString().replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).trim();  // erase generics
+                String pkg = cu.getPackageDeclaration().map(p -&gt; p.getNameAsString() + &quot;.&quot;).orElse(&quot;&quot;);
+                if (type.isEmpty() || !Character.isJavaIdentifierStart(type.charAt(0))) {
+                    return;
+                }
+                if (!type.contains(&quot;.&quot;) &amp;&amp; Character.isUpperCase(type.charAt(0))) {
+                    map.put(v.getNameAsString(), pkg + type);
+                } else {
+                    map.put(v.getNameAsString(), type);
+                }
+            }));
+        }
+        return map;
+    }
+
+    private static Optional&lt;MethodDeclaration&gt; findMethod(CompilationUnit cu, String simple, String method) {
+        for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            if (!c.getNameAsString().equals(simple)) {
+                continue;
+            }
+            for (MethodDeclaration m : c.getMethods()) {
+                if (m.getNameAsString().equals(method)) {
+                    return Optional.of(m);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    static List&lt;String&gt; listPublicMethods(Path root, String fqcn) throws Exception {
+        Path src = sourcePath(root, fqcn);
+        List&lt;String&gt; names = new ArrayList&lt;&gt;();
+        if (!Files.isRegularFile(src)) {
+            return names;
+        }
+        CompilationUnit cu = StaticJavaParser.parse(src);
+        String simple = simpleName(fqcn);
+        for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            if (!c.getNameAsString().equals(simple)) {
+                continue;
+            }
+            for (MethodDeclaration m : c.getMethods()) {
+                if (m.isPublic() &amp;&amp; !m.getNameAsString().equals(&quot;main&quot;)) {
+                    names.add(m.getNameAsString());
+                }
+            }
+        }
+        return names;
+    }
+
+    private static Path sourcePath(Path root, String fqcn) {
+        String clean = fqcn.replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).trim();   // never allow a generic/illegal name in a path
+        return root.resolve(clean.replace('.', '/') + &quot;.java&quot;);
+    }
+
+    private static String simpleName(String fqcn) {
+        int i = fqcn.lastIndexOf('.');
+        return i &lt; 0 ? fqcn : fqcn.substring(i + 1);
+    }
+}
+</pre>
+<h4>DataFlowScanner.java</h4>
+<pre>package com.testgen;
+
+import com.config.Config;
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.Parameter;
+import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.stmt.ReturnStmt;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * ROADMAP tool 3: lite def→use (params/fields → sink call args/receivers).
+ * Output: {@code MODULE/testgen/reports/dataflow/{Fqcn}__{method}.md}
+ */
+public final class DataFlowScanner {
+
+    private DataFlowScanner() {}
+
+    public static void run() throws Exception {
+        Path outDir = Config.reportsDir().resolve(&quot;dataflow&quot;);
+        Files.createDirectories(outDir);
+        Path root = Config.mainSourceRoot();
+        int wrote = 0;
+        for (String target : Config.readMethodTargets()) {
+            try {
+                String fqcn = target;
+                String method = null;
+                int hash = target.indexOf('#');
+                if (hash &gt; 0) {
+                    fqcn = target.substring(0, hash).trim();
+                    method = target.substring(hash + 1).trim();
+                }
+                List&lt;String&gt; methods = new ArrayList&lt;&gt;();
+                if (method == null || method.isBlank()) {
+                    methods.addAll(CallChainScanner.listPublicMethods(root, fqcn));
+                } else {
+                    methods.add(method);
+                }
+                java.util.Map&lt;String,Integer&gt; seen = new java.util.HashMap&lt;&gt;();
+                for (String m : methods) {
+                    String md = analyze(root, fqcn, m);
+                    int n = seen.merge(m, 1, Integer::sum);
+                    String fileKey = (n == 1) ? m : m + &quot;_&quot; + n;   // BUG-1: overloads must not overwrite
+                    Path out = outDir.resolve(fqcn + &quot;__&quot; + fileKey + &quot;.md&quot;);
+                    Files.writeString(out, md);
+                    System.out.println(&quot;Wrote &quot; + out);
+                    wrote++;
+                }
+            } catch (Throwable t) {   // isolate per-target: one bad target must not abort the batch
+                System.out.println(&quot;SKIP dataflow &quot; + target + &quot; -&gt; &quot; + t.getClass().getSimpleName()
+                        + &quot;: &quot; + t.getMessage());
+            }
+        }
+        System.out.println(&quot;DataFlow done. &quot; + wrote + &quot; report(s) in &quot; + outDir.toAbsolutePath());
+    }
+
+    public static String analyze(Path mainSourceRoot, String fqcn, String method) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append(&quot;# dataflow\n&quot;);
+        sb.append(&quot;sut: &quot;).append(fqcn).append('#').append(method).append('\n');
+        sb.append('\n');
+        String clean = fqcn.replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).trim();   // never allow a generic/illegal name in a path
+        Path src = mainSourceRoot.resolve(clean.replace('.', '/') + &quot;.java&quot;);
+        if (!Files.isRegularFile(src)) {
+            sb.append(&quot;- (no source)\n&quot;);
+            return sb.toString();
+        }
+        CompilationUnit cu = StaticJavaParser.parse(src);
+        String simple = simpleName(fqcn);
+        Optional&lt;MethodDeclaration&gt; mdOpt = Optional.empty();
+        Set&lt;String&gt; fieldNames = new LinkedHashSet&lt;&gt;();
+        Set&lt;String&gt; staticFields = new LinkedHashSet&lt;&gt;();
+        for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            if (!c.getNameAsString().equals(simple)) {
+                continue;
+            }
+            c.getFields().forEach(f -&gt; f.getVariables().forEach(v -&gt; {
+                fieldNames.add(v.getNameAsString());
+                if (f.isStatic()) {
+                    staticFields.add(v.getNameAsString());
+                }
+            }));
+            for (MethodDeclaration m : c.getMethods()) {
+                if (m.getNameAsString().equals(method)) {
+                    mdOpt = Optional.of(m);
+                }
+            }
+        }
+        if (mdOpt.isEmpty()) {
+            sb.append(&quot;- (method not found)\n&quot;);
+            return footer(sb);
+        }
+        MethodDeclaration md = mdOpt.get();
+        Set&lt;String&gt; params = new LinkedHashSet&lt;&gt;();
+        for (Parameter p : md.getParameters()) {
+            params.add(p.getNameAsString());
+        }
+        List&lt;String&gt; edges = new ArrayList&lt;&gt;();
+        for (MethodCallExpr call : md.findAll(MethodCallExpr.class)) {
+            String callee = call.getNameAsString();
+            String recv = call.getScope().map(Object::toString).orElse(&quot;this&quot;);
+            // receiver uses field?
+            call.getScope().ifPresent(scope -&gt; {
+                String name = nameOf(scope);
+                if (name != null &amp;&amp; fieldNames.contains(name)) {
+                    edges.add(&quot;- field &quot; + (staticFields.contains(name) ? &quot;&quot; : &quot;this.&quot;) + name + &quot; -&gt; &quot; + recv + &quot;.&quot; + callee + &quot;  [receiver]&quot;);
+                }
+            });
+            int ai = 0;
+            for (Expression arg : call.getArguments()) {
+                String name = nameOf(arg);
+                if (name != null &amp;&amp; params.contains(name)) {
+                    edges.add(&quot;- param &quot; + name + &quot; -&gt; &quot; + formatCall(recv, callee) + &quot;  [arg&quot; + ai + &quot;]&quot;);
+                } else if (name != null &amp;&amp; fieldNames.contains(name)) {
+                    edges.add(&quot;- field &quot; + (staticFields.contains(name) ? &quot;&quot; : &quot;this.&quot;) + name + &quot; -&gt; &quot; + formatCall(recv, callee) + &quot;  [arg&quot; + ai + &quot;]&quot;);
+                }
+                ai++;
+            }
+            // claude addition: a sink call whose result feeds the method's return value
+            if (call.findAncestor(ReturnStmt.class).isPresent()) {
+                edges.add(&quot;- call &quot; + formatCall(recv, callee) + &quot; -&gt; return  [return-value]&quot;);
+            }
+        }
+        if (edges.isEmpty()) {
+            sb.append(&quot;- (no param/field → sink edges)\n&quot;);
+        } else {
+            edges.stream().distinct().forEach(e -&gt; sb.append(e).append('\n'));
+        }
+        return footer(sb);
+    }
+
+    private static String footer(StringBuilder sb) {
+        sb.append('\n');
+        sb.append(&quot;## unsolved (ROADMAP 4–9)\n&quot;);
+        sb.append(&quot;- reflection, runtime config, DI, polymorphism, mocks/proxies, 3p internals\n&quot;);
+        return sb.toString();
+    }
+
+    private static String formatCall(String recv, String callee) {
+        return recv + &quot;.&quot; + callee + &quot;(…)&quot;;
+    }
+
+    private static String nameOf(Expression e) {
+        if (e instanceof NameExpr ne) {
+            return ne.getNameAsString();
+        }
+        if (e instanceof FieldAccessExpr fa) {
+            return fa.getNameAsString();
+        }
+        return null;
+    }
+
+    private static String simpleName(String fqcn) {
+        int i = fqcn.lastIndexOf('.');
+        return i &lt; 0 ? fqcn : fqcn.substring(i + 1);
+    }
+}
+</pre>
+<h4>DepGraphMarker.java</h4>
+<pre>package com.testgen;
+
+import com.config.Config;
+
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.TypeDeclaration;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Step 2: inject per-SUT dependency graphs into source as line comments under the class brace.
+ *
+ * Markers (idempotent replace):
+ *   // BEGIN testgen-dependencies
+ *   ...
+ *   // END testgen-dependencies
+ *
+ * Also strips legacy // BEGIN testgen-deps … // END testgen-deps blocks.
+ */
+public final class DepGraphMarker {
+
+    static final String BEGIN = &quot;// BEGIN testgen-dependencies&quot;;
+    static final String END = &quot;// END testgen-dependencies&quot;;
+
+    /** Legacy short name — still stripped on inject/strip so older SUTs clean up. */
+    static final String LEGACY_BEGIN = &quot;// BEGIN testgen-deps&quot;;
+    static final String LEGACY_END = &quot;// END testgen-deps&quot;;
+
+    private static final Pattern MARKER_BLOCK = Pattern.compile(
+            &quot;(?m)^[ \\t]*&quot; + Pattern.quote(BEGIN) + &quot;[\\s\\S]*?&quot;
+                    + &quot;^[ \\t]*&quot; + Pattern.quote(END) + &quot;[ \\t]*\\R?&quot;);
+
+    private static final Pattern LEGACY_MARKER_BLOCK = Pattern.compile(
+            &quot;(?m)^[ \\t]*&quot; + Pattern.quote(LEGACY_BEGIN) + &quot;[\\s\\S]*?&quot;
+                    + &quot;^[ \\t]*&quot; + Pattern.quote(LEGACY_END) + &quot;[ \\t]*\\R?&quot;);
+
+    private DepGraphMarker() {}
+
+    /** Write each SUT's {@code // BEGIN..END} dependency-graph block into its source. */
+    public static void embed() throws Exception {
+        run(false);
+    }
+
+    /** Remove the {@code // BEGIN..END} dependency-graph block from each SUT's source. */
+    public static void strip() throws Exception {
+        run(true);
+    }
+
+    private static void run(boolean strip) throws Exception {
+        List&lt;String&gt; classes = Config.readClasses();
+        Path mainSourceRoot = Config.mainSourceRoot();
+        Path dependenciesDir = Config.reportsDir();
+
+        int ok = 0;
+        for (String fqcn : classes) {
+            try {
+                int lastDot = fqcn.lastIndexOf('.');
+                Path src = mainSourceRoot
+                        .resolve(fqcn.substring(0, lastDot).replace('.', '/'))
+                        .resolve(fqcn.substring(lastDot + 1) + &quot;.java&quot;);
+                if (!Files.isRegularFile(src)) {
+                    System.err.println(&quot;SKIP missing source: &quot; + src);
+                    continue;
+                }
+                if (strip) {
+                    stripFile(src);
+                    System.out.println(&quot;Stripped &quot; + src);
+                } else {
+                    Path graph = dependenciesDir.resolve(fqcn + &quot;.md&quot;);
+                    if (!Files.isRegularFile(graph)) {
+                        System.err.println(&quot;SKIP missing graph (run scan first): &quot; + graph);
+                        continue;
+                    }
+                    String combined = withGraphReports(Files.readString(graph), fqcn);
+                    injectFile(src, fqcn, combined);
+                    System.out.println(&quot;Embedded &quot; + src);
+                }
+                ok++;
+            } catch (Exception e) {   // isolate per-SUT: one failure must not abort the batch
+                System.out.println(&quot;SKIP &quot; + (strip ? &quot;strip &quot; : &quot;embed &quot;) + fqcn + &quot; -&gt; &quot;
+                        + e.getClass().getSimpleName() + &quot;: &quot; + e.getMessage());
+            }
+        }
+        System.out.println((strip ? &quot;Strip&quot; : &quot;Embed&quot;) + &quot; done for &quot; + ok + &quot; file(s).&quot;);
+    }
+
+    static void injectFile(Path src, String fqcn, String markdown) throws Exception {
+        String text = Files.readString(src);
+        text = stripAllMarkers(text);
+        text = trimTrailingBlankLines(text);
+
+        String commentBlock = toCommentBlock(markdown);
+        String simpleName = fqcn.substring(fqcn.lastIndexOf('.') + 1);
+        String updated = insertAfterClassClosingBrace(text, simpleName, commentBlock);
+        Files.writeString(src, updated);
+    }
+
+    /** Fold this class's call-chain + data-flow reports onto its dependency markdown, so the SUT's
+     *  injected block carries all three graphs (a reader consumes them inline, like the dep graph). */
+    static String withGraphReports(String depMarkdown, String fqcn) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append(banner(&quot;GRAPH 1 of 3  —  DEPENDENCY GRAPH  (SUT + collaborators, hop 2)&quot;));
+        sb.append(depMarkdown.strip()).append('\n');
+        String callChain = concatReports(Config.reportsDir().resolve(&quot;callchain&quot;), fqcn);
+        String dataFlow = concatReports(Config.reportsDir().resolve(&quot;dataflow&quot;), fqcn);
+        if (!callChain.isEmpty()) {
+            sb.append('\n').append(banner(&quot;GRAPH 2 of 3  —  CALL-CHAIN GRAPH  (per public method)&quot;));
+            sb.append(callChain.strip()).append('\n');
+        }
+        if (!dataFlow.isEmpty()) {
+            sb.append('\n').append(banner(&quot;GRAPH 3 of 3  —  DATA-FLOW GRAPH  (per public method)&quot;));
+            sb.append(dataFlow.strip()).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** Readable section banner so the three graphs are visually distinct once injected as comments. */
+    static String banner(String title) {
+        String bar = &quot;=&quot;.repeat(66);
+        return bar + &quot;\n&quot; + title + &quot;\n&quot; + bar + &quot;\n&quot;;
+    }
+
+    /** Concatenate reports/&amp;lt;kind&amp;gt;/&amp;lt;fqcn&amp;gt;__*.md for this class (sorted); empty if none. */
+    static String concatReports(Path dir, String fqcn) throws Exception {
+        if (!Files.isDirectory(dir)) {
+            return &quot;&quot;;
+        }
+        String prefix = fqcn + &quot;__&quot;;
+        List&lt;Path&gt; files;
+        try (java.util.stream.Stream&lt;Path&gt; stream = Files.list(dir)) {
+            files = stream
+                    .filter(p -&gt; {
+                        String n = p.getFileName().toString();
+                        return n.startsWith(prefix) &amp;&amp; n.endsWith(&quot;.md&quot;);
+                    })
+                    .sorted()
+                    .collect(java.util.stream.Collectors.toList());
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Path p : files) {
+            sb.append(Files.readString(p).strip()).append('\n');
+        }
+        return sb.toString();
+    }
+
+    static void stripFile(Path src) throws Exception {
+        String text = Files.readString(src);
+        String stripped = stripAllMarkers(text);
+        stripped = trimTrailingBlankLines(stripped);
+        if (!stripped.endsWith(&quot;\n&quot;)) {
+            stripped = stripped + &quot;\n&quot;;
+        }
+        Files.writeString(src, stripped);
+    }
+
+    static String stripAllMarkers(String text) {
+        text = MARKER_BLOCK.matcher(text).replaceAll(&quot;&quot;);
+        text = LEGACY_MARKER_BLOCK.matcher(text).replaceAll(&quot;&quot;);
+        return text;
+    }
+
+    /** Each markdown line becomes a // comment line; wrapped by BEGIN/END markers. */
+    static String toCommentBlock(String markdown) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(BEGIN).append('\n');
+        for (String line : markdown.replace(&quot;\r\n&quot;, &quot;\n&quot;).replace('\r', '\n').split(&quot;\n&quot;, -1)) {
+            if (line.isEmpty()) {
+                sb.append(&quot;//\n&quot;);
+            } else {
+                sb.append(&quot;// &quot;).append(line).append('\n');
+            }
+        }
+        sb.append(END).append('\n');
+        return sb.toString();
+    }
+
+    static String insertAfterClassClosingBrace(String source, String simpleName, String commentBlock)
+            throws Exception {
+        CompilationUnit cu = StaticJavaParser.parse(source);
+        TypeDeclaration&lt;?&gt; type = cu.getTypes().stream()   // any top-level type: class, interface, enum, record
+                .filter(t -&gt; t.getNameAsString().equals(simpleName))
+                .findFirst()
+                .orElseThrow(() -&gt; new IllegalStateException(&quot;Type not found: &quot; + simpleName));
+
+        int endLine = type.getEnd()
+                .orElseThrow(() -&gt; new IllegalStateException(&quot;No end position for &quot; + simpleName))
+                .line; // 1-based
+
+        List&lt;String&gt; lines = new ArrayList&lt;&gt;(List.of(source.replace(&quot;\r\n&quot;, &quot;\n&quot;).split(&quot;\n&quot;, -1)));
+        int insertAt = Math.min(endLine, lines.size());
+        List&lt;String&gt; commentLines = List.of(commentBlock.replace(&quot;\r\n&quot;, &quot;\n&quot;).split(&quot;\n&quot;, -1));
+        if (!commentLines.isEmpty() &amp;&amp; commentLines.get(commentLines.size() - 1).isEmpty()) {
+            commentLines = commentLines.subList(0, commentLines.size() - 1);
+        }
+
+        List&lt;String&gt; out = new ArrayList&lt;&gt;();
+        out.addAll(lines.subList(0, insertAt));
+        if (!out.isEmpty() &amp;&amp; !out.get(out.size() - 1).isBlank()) {
+            out.add(&quot;&quot;);
+        }
+        out.addAll(commentLines);
+        if (insertAt &lt; lines.size()) {
+            out.addAll(lines.subList(insertAt, lines.size()));
+        }
+        String joined = String.join(&quot;\n&quot;, out);
+        if (!joined.endsWith(&quot;\n&quot;)) {
+            joined = joined + &quot;\n&quot;;
+        }
+        return joined;
+    }
+
+    private static String trimTrailingBlankLines(String text) {
+        text = text.replace(&quot;\r\n&quot;, &quot;\n&quot;).replace('\r', '\n');
+        while (text.endsWith(&quot;\n\n&quot;)) {
+            text = text.substring(0, text.length() - 1);
+        }
+        Matcher leftover = MARKER_BLOCK.matcher(text);
+        if (leftover.find()) {
+            text = leftover.replaceAll(&quot;&quot;);
+        }
+        leftover = LEGACY_MARKER_BLOCK.matcher(text);
+        if (leftover.find()) {
+            text = leftover.replaceAll(&quot;&quot;);
+        }
+        return text;
+    }
+}
+</pre>
+<h4>TestSkeletonGenerator.java</h4>
+<pre>package com.testgen;
+
+import com.config.Config;
+
+import com.squareup.javapoet.AnnotationSpec;
+import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.CodeBlock;
+import com.squareup.javapoet.FieldSpec;
+import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.MethodSpec;
+import com.squareup.javapoet.TypeName;
+import com.squareup.javapoet.TypeSpec;
+
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
+
+import javax.lang.model.element.Modifier;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
+/**
+ * Batch skeleton generator:
+ * - Instancio for concrete types + SUT instance (not manual ctor wiring)
+ * - Mockito.mock for interfaces; minimal stubbing for smoke act
+ * - instance + static in same class; static-only SUTs get static tests only
+ * - SUT contract methods: declared; if empty/thin → interfaces + immediate parent
+ * - mirrors declared checked exceptions on generated @Test methods
+ * - skip if *{suffix} already exists
+ *
+ * Array TypeName via {@link TypeName#get(java.lang.reflect.Type)} (javaPoetType).
+ */
+public final class TestSkeletonGenerator {
+
+    private static final ClassName INSTANCIO = ClassName.get(&quot;org.instancio&quot;, &quot;Instancio&quot;);
+    private static final ClassName SELECT = ClassName.get(&quot;org.instancio&quot;, &quot;Select&quot;);
+    private static final ClassName MOCKITO = ClassName.get(&quot;org.mockito&quot;, &quot;Mockito&quot;);
+    private static final ClassName MATCHERS = ClassName.get(&quot;org.mockito&quot;, &quot;ArgumentMatchers&quot;);
+    private static final ClassName TEST = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Test&quot;);
+    private static final ClassName BEFORE_EACH = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;BeforeEach&quot;);
+    private static final ClassName DISABLED = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Disabled&quot;);
+    private static final ClassName ASSERTIONS = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Assertions&quot;);
+    private static final ClassName MOCKED_STATIC = ClassName.get(&quot;org.mockito&quot;, &quot;MockedStatic&quot;);
+    private static final ClassName MOCKED_CONSTRUCTION = ClassName.get(&quot;org.mockito&quot;, &quot;MockedConstruction&quot;);
+
+    private TestSkeletonGenerator() {}
+
+    public static void run() throws Exception {
+        Path testSourceRoot = Config.testSourceRoot();
+        String suffix = Config.TEST_NAME_SUFFIX;
+        List&lt;String&gt; classes = Config.readClasses();
+
+        for (String fqcn : classes) {
+            try {
+                writeSkeleton(Class.forName(fqcn, false, TestSkeletonGenerator.class.getClassLoader()),
+                        testSourceRoot, suffix);
+            } catch (Throwable t) {
+                String why = (t.getMessage() != null) ? t.getMessage() : t.toString();
+                System.out.println(&quot;SKIP (unresolved &quot; + t.getClass().getSimpleName() + &quot;: &quot; + why + &quot;): &quot; + fqcn);
+            }
+        }
+    }
+
+    static void writeSkeleton(Class&lt;?&gt; sut, Path testSourceRoot, String suffix) throws Exception {
+        String testPackage = sut.getPackageName();
+        String testSimpleName = sut.getSimpleName() + suffix;
+        Path target = testSourceRoot
+                .resolve(testPackage.replace('.', '/'))
+                .resolve(testSimpleName + &quot;.java&quot;);
+        if (Files.exists(target)) {
+            System.out.println(&quot;SKIP (exists): &quot; + target);
+            return;
+        }
+
+        boolean staticOnly = isStaticOnlyClass(sut);
+        // BUG-2a (agent5 merge): an enum with an abstract method reports isAbstract()==true but IS
+        // instantiable via its constants (Instancio yields a constant) — don't skip its instance methods.
+        boolean abstractSut = !sut.isInterface() &amp;&amp; !sut.isEnum()
+                &amp;&amp; java.lang.reflect.Modifier.isAbstract(sut.getModifiers());
+        boolean genericSut = sut.getTypeParameters().length &gt; 0;   // Instancio can't build Foo&lt;T&gt; without a type witness
+        boolean ifaceSut = sut.isInterface();
+        boolean uninstantiable = abstractSut || genericSut || ifaceSut;
+        if (uninstantiable) {
+            System.out.println(&quot;WARN &quot; + (ifaceSut ? &quot;interface&quot; : genericSut ? &quot;generic&quot; : &quot;abstract&quot;)
+                    + &quot; SUT — instance tests skipped (cannot instantiate reliably): &quot; + sut.getName());
+        }
+        List&lt;Method&gt; instanceMethods =
+                (staticOnly || uninstantiable) ? List.of() : contractInstanceMethods(sut);
+        List&lt;Method&gt; staticMethods = contractStaticMethods(sut);
+        boolean staticPrefix = !staticOnly &amp;&amp; !instanceMethods.isEmpty();
+
+        TypeSpec.Builder testClass = TypeSpec.classBuilder(testSimpleName)
+                .addModifiers(Modifier.PUBLIC)
+                .addJavadoc(
+                        &quot;AUTO-GENERATED arrange skeleton for $L.\n&quot;
+                                + &quot;Instancio SUT + locals per test; real assertions to be filled in after generation.\n&quot;,
+                        sut.getName());
+
+        if (!instanceMethods.isEmpty()) {
+            testClass.addField(FieldSpec.builder(ClassName.get(sut), &quot;sut&quot;, Modifier.PRIVATE).build());
+            testClass.addMethod(setUpMethod(sut));
+            Set&lt;String&gt; usedNames = new HashSet&lt;&gt;();
+            for (Method m : instanceMethods) {
+                testClass.addMethod(instanceTest(sut, m, usedNames));
+            }
+        }
+        if (!staticMethods.isEmpty()) {
+            Set&lt;String&gt; usedNames = instanceMethods.stream()
+                    .map(TestSkeletonGenerator::safeName)
+                    .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+            for (Method m : staticMethods) {
+                testClass.addMethod(staticTest(sut, m, staticPrefix, usedNames));
+            }
+        }
+        if (instanceMethods.isEmpty() &amp;&amp; staticMethods.isEmpty()) {
+            System.out.println(&quot;WARN no public methods: &quot; + sut.getName());
+            testClass.addJavadoc(&quot;No public methods discovered.\n&quot;);
+        }
+
+        JavaFile.builder(testPackage, testClass.build())
+                .addFileComment(&quot;AUTO-GENERATED by testgen TestSkeletonGenerator&quot;)
+                .build()
+                .writeTo(testSourceRoot);
+
+        System.out.println(&quot;Wrote &quot; + testPackage + &quot;.&quot; + testSimpleName
+                + &quot; (instance=&quot; + instanceMethods.size() + &quot;, static=&quot; + staticMethods.size() + &quot;)&quot;);
+    }
+
+    private static MethodSpec setUpMethod(Class&lt;?&gt; sut) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(&quot;setUp&quot;)
+                .addAnnotation(BEFORE_EACH)
+                .addModifiers(Modifier.PUBLIC)
+                .addException(Exception.class);   // stubbed collaborator methods may throw checked exceptions
+
+        List&lt;FieldMockRef&gt; fieldMocks = new ArrayList&lt;&gt;();
+        for (Field field : instanceFields(sut)) {
+            Class&lt;?&gt; ft = field.getType();
+            Class&lt;?&gt; coll = collectionImpl(ft);
+            Class&lt;?&gt; sealedImpl = sealedConcrete(ft);   // sealed types are unmockable → use a permitted impl
+            boolean abstractCls = !ft.isArray() &amp;&amp; !ft.isInterface() &amp;&amp; !ft.isPrimitive()
+                    &amp;&amp; java.lang.reflect.Modifier.isAbstract(ft.getModifiers());   // primitives report isAbstract too
+            if (coll == null &amp;&amp; sealedImpl == null &amp;&amp; !ft.isInterface() &amp;&amp; !abstractCls
+                    &amp;&amp; !(ft.getTypeParameters().length &gt; 0 &amp;&amp; !ft.isArray() &amp;&amp; ft != Class.class)) {
+                continue;   // mock interface/abstract + generic-concrete fields (Instancio can't build them); Class is unmockable
+            }
+            boolean realValue = coll != null || sealedImpl != null;   // real object, not a mock → no stubbing
+            String var = field.getName() + (realValue ? &quot;Val&quot; : &quot;Mock&quot;);
+            fieldMocks.add(new FieldMockRef(ft, var, field.getDeclaringClass(), field.getName(), realValue));
+            if (coll != null) {   // real empty collection, not a mock (mock iterator() == null → NPE when iterated)
+                b.addStatement(&quot;$T $L = new $T&lt;&gt;()&quot;, ClassName.get(ft), var, ClassName.get(coll));
+            } else if (sealedImpl != null) {   // permitted concrete impl of the sealed type
+                b.addStatement(&quot;$T $L = $T.create($T.class)&quot;, ClassName.get(ft), var, INSTANCIO, ClassName.get(sealedImpl));
+            } else {
+                b.addStatement(&quot;$T $L = $T.mock($T.class)&quot;,
+                        ClassName.get(ft), var, MOCKITO, ClassName.get(ft));
+            }
+        }
+
+        if (fieldMocks.isEmpty()) {
+            b.addStatement(&quot;sut = $T.create($T.class)&quot;, INSTANCIO, ClassName.get(sut));
+        } else {
+            CodeBlock.Builder chain = CodeBlock.builder().add(&quot;sut = $T.of($T.class)&quot;,
+                    INSTANCIO, ClassName.get(sut));
+            for (FieldMockRef mock : fieldMocks) {
+                chain.add(&quot;\n    .set($T.field($T.class, $S), $L)&quot;,
+                        SELECT, ClassName.get(mock.declaringClass), mock.fieldName, mock.varName);
+            }
+            chain.add(&quot;\n    .create();\n&quot;);
+            b.addCode(chain.build());
+        }
+
+        for (FieldMockRef mock : fieldMocks) {
+            if (mock.skipStub()) continue;   // real collection/sealed value, not a mock — nothing to stub
+            b.addCode(minimalStubs(new MockRef(mock.type(), mock.varName()), fieldBindings(sut, mock)));
+            b.addCode(factoryStubs(sut, mock.type(), mock.fieldName(), mock.varName()));   // call-site Class&lt;T&gt; binds
+        }
+        return b.build();
+    }
+
+    private static MethodSpec instanceTest(Class&lt;?&gt; sut, Method method, Set&lt;String&gt; usedNames) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(safeName(method), usedNames))
+                .addModifiers(Modifier.PUBLIC)
+                .addAnnotation(TEST)
+                .addException(Exception.class);   // stubbed collaborator methods may throw checked exceptions
+        addDeclaredExceptions(method, b);
+
+        String disable = disableReason(method);
+        if (disable != null) return disabledTest(b, disable);
+
+        SutStatics st = analyzeStaticsAndNew(sut, method);
+        boolean scope = st != null &amp;&amp; (!st.staticTargets().isEmpty() || !st.constructedTypes().isEmpty());
+        if (scope) {
+            b.beginControlFlow(&quot;try ($L)&quot;, mockScopeResources(st));
+            emitStaticStubs(b, st, sut);
+        }
+
+        List&lt;MockRef&gt; mocks = new ArrayList&lt;&gt;();
+        List&lt;String&gt; methodArgNames = new ArrayList&lt;&gt;();
+        java.lang.reflect.Type[] gpts = method.getGenericParameterTypes();
+        Parameter[] ps = method.getParameters();
+        for (int i = 0; i &lt; ps.length; i++) {
+            Class&lt;?&gt; ptype = resolveParamType(sut, gpts[i], ps[i].getType());
+            String var = &quot;a&quot; + i + &quot;_&quot; + simpleParamName(ps[i]);
+            b.addCode(arrangeLine(ptype, var, mocks));
+            methodArgNames.add(var);
+        }
+
+        for (MockRef mock : mocks) {
+            b.addCode(minimalStubs(mock));
+        }
+
+        String callArgs = String.join(&quot;, &quot;, methodArgNames);
+        if (method.getReturnType() == void.class) {
+            b.addStatement(&quot;sut.$L($L)&quot;, method.getName(), callArgs);
+            b.addStatement(&quot;$T.assertNotNull(sut)&quot;, ASSERTIONS);
+        } else if (method.getReturnType().isPrimitive()) {
+            b.addStatement(&quot;sut.$L($L)&quot;, method.getName(), callArgs);
+            b.addStatement(&quot;$T.assertTrue(true)&quot;, ASSERTIONS);
+        } else {
+            b.addStatement(&quot;$T result = sut.$L($L)&quot;,
+                    TypeName.get(method.getReturnType()), method.getName(), callArgs);
+            b.addComment(&quot;TODO: assert on result (a null return may be valid — arrange skeleton)&quot;);
+        }
+        if (scope) {
+            b.endControlFlow();
+        }
+        return b.build();
+    }
+
+    private static MethodSpec staticTest(Class&lt;?&gt; sut, Method method, boolean prefix, Set&lt;String&gt; usedNames) {
+        String base = prefix ? &quot;static_&quot; + safeName(method) : safeName(method);
+        MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(base, usedNames))
+                .addModifiers(Modifier.PUBLIC)
+                .addAnnotation(TEST)
+                .addException(Exception.class);   // stubbed collaborator methods may throw checked exceptions
+        addDeclaredExceptions(method, b);
+
+        String disable = disableReason(method);
+        if (disable != null) return disabledTest(b, disable);
+
+        SutStatics st = analyzeStaticsAndNew(sut, method);
+        boolean scope = st != null &amp;&amp; (!st.staticTargets().isEmpty() || !st.constructedTypes().isEmpty());
+        if (scope) {
+            b.beginControlFlow(&quot;try ($L)&quot;, mockScopeResources(st));
+            emitStaticStubs(b, st, sut);
+        }
+
+        List&lt;MockRef&gt; mocks = new ArrayList&lt;&gt;();
+        List&lt;String&gt; methodArgNames = new ArrayList&lt;&gt;();
+        java.lang.reflect.Type[] gpts = method.getGenericParameterTypes();
+        Parameter[] ps = method.getParameters();
+        for (int i = 0; i &lt; ps.length; i++) {
+            Class&lt;?&gt; ptype = resolveParamType(sut, gpts[i], ps[i].getType());
+            String var = &quot;a&quot; + i + &quot;_&quot; + simpleParamName(ps[i]);
+            b.addCode(arrangeLine(ptype, var, mocks));
+            methodArgNames.add(var);
+        }
+        for (MockRef mock : mocks) {
+            b.addCode(minimalStubs(mock));
+        }
+
+        String callArgs = String.join(&quot;, &quot;, methodArgNames);
+        ClassName sutCn = ClassName.get(sut);
+        if (method.getReturnType() == void.class) {
+            b.addStatement(&quot;$T.$L($L)&quot;, sutCn, method.getName(), callArgs);
+            b.addStatement(&quot;$T.assertTrue(true)&quot;, ASSERTIONS);
+        } else if (method.getReturnType().isPrimitive()) {
+            b.addStatement(&quot;$T.$L($L)&quot;, sutCn, method.getName(), callArgs);
+            b.addStatement(&quot;$T.assertTrue(true)&quot;, ASSERTIONS);
+        } else {
+            b.addStatement(&quot;$T result = $T.$L($L)&quot;,
+                    TypeName.get(method.getReturnType()), sutCn, method.getName(), callArgs);
+            b.addComment(&quot;TODO: assert on result (a null return may be valid — arrange skeleton)&quot;);
+        }
+        if (scope) {
+            b.endControlFlow();
+        }
+        return b.build();
+    }
+
+    private static List&lt;Field&gt; instanceFields(Class&lt;?&gt; sut) {
+        List&lt;Field&gt; fields = new ArrayList&lt;&gt;();
+        Class&lt;?&gt; cur = sut;
+        while (cur != null &amp;&amp; cur != Object.class) {
+            // Skip JDK frames (e.g. Throwable.suppressedExceptions) — not SUT collaborators.
+            if (isJdkType(cur)) {
+                cur = cur.getSuperclass();
+                continue;
+            }
+            for (Field field : cur.getDeclaredFields()) {
+                if (!java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                    fields.add(field);
+                }
+            }
+            cur = cur.getSuperclass();
+        }
+        return fields;
+    }
+
+    private static boolean isJdkType(Class&lt;?&gt; type) {
+        Package p = type.getPackage();
+        if (p == null) {
+            return false;
+        }
+        String n = p.getName();
+        return n.equals(&quot;java&quot;) || n.startsWith(&quot;java.&quot;)
+                || n.equals(&quot;javax&quot;) || n.startsWith(&quot;javax.&quot;)
+                || n.equals(&quot;jdk&quot;) || n.startsWith(&quot;jdk.&quot;);
+    }
+
+    /** True if the class's top-level source exists under the main source root (project type, not JDK/third-party). */
+    private static boolean isProjectType(Class&lt;?&gt; type) {
+        if (type == null) {
+            return false;
+        }
+        Class&lt;?&gt; top = type;
+        while (top.getEnclosingClass() != null) {
+            top = top.getEnclosingClass();
+        }
+        return Files.exists(Config.mainSourceRoot().resolve(top.getName().replace('.', '/') + &quot;.java&quot;));
+    }
+
+    /** Resolve a parameter's generic type against the SUT's superclass parameterization, so a type
+     *  variable from a generic parent (e.g. T extends ClaimsHolder) becomes the concrete type the
+     *  call site requires (e.g. HeaderClaimsHolder) rather than the erased bound. Falls back to erased. */
+    /** Honest skip: a compiling @Disabled test with the reason, for methods the skeleton can't arrange. */
+    private static MethodSpec disabledTest(MethodSpec.Builder b, String reason) {
+        b.addAnnotation(AnnotationSpec.builder(DISABLED).addMember(&quot;value&quot;, &quot;$S&quot;, reason).build());
+        b.addStatement(&quot;$T.assertTrue(true)&quot;, ASSERTIONS);
+        return b.build();
+    }
+
+    private static Class&lt;?&gt; resolveParamType(Class&lt;?&gt; sut, java.lang.reflect.Type generic, Class&lt;?&gt; erased) {
+        try {
+            Class&lt;?&gt; multi = multiBoundConcrete(generic);
+            if (multi != null) return multi;   // &lt;T extends Number &amp; Comparable&lt;T&gt;&gt; -&gt; Integer (satisfies all)
+            Class&lt;?&gt; r = toClass(resolveType(generic, typeBindings(sut)));
+            return (r != null &amp;&amp; r != Object.class) ? r : erased;
+        } catch (Throwable t) {
+            return erased;
+        }
+    }
+
+    /** For a type variable with an INTERSECTION bound whose first bound alone can't be denoted as an
+     *  argument (Number isn't Comparable), find a concrete type assignable to ALL bounds so the call
+     *  type-checks. Returns null when the first bound already satisfies the rest (normal path) or when
+     *  no common concrete exists (caller then @Disables the method). */
+    private static Class&lt;?&gt; multiBoundConcrete(java.lang.reflect.Type generic) {
+        if (!(generic instanceof java.lang.reflect.TypeVariable&lt;?&gt; tv)) return null;
+        java.lang.reflect.Type[] bounds = tv.getBounds();
+        if (bounds.length &lt;= 1) return null;
+        Class&lt;?&gt; first = toClass(bounds[0]);
+        boolean firstSatisfies = true;
+        for (int i = 1; i &lt; bounds.length; i++) {
+            if (!toClass(bounds[i]).isAssignableFrom(first)) { firstSatisfies = false; break; }
+        }
+        if (firstSatisfies) return null;   // first bound denotable on its own — normal path handles it
+        for (Class&lt;?&gt; c : new Class&lt;?&gt;[]{Integer.class, Long.class, Double.class, String.class, Boolean.class}) {
+            boolean ok = true;
+            for (java.lang.reflect.Type b : bounds) if (!toClass(b).isAssignableFrom(c)) { ok = false; break; }
+            if (ok) return c;
+        }
+        return null;   // no common concrete -&gt; method gets @Disabled
+    }
+
+    /** Non-null reason when a method can't be safely arranged: an intersection-bound type-var param
+     *  with no denotable/concrete satisfying type. The test is emitted @Disabled (honest skip) rather
+     *  than as code that won't compile. */
+    private static String disableReason(Method m) {
+        for (java.lang.reflect.Type gt : m.getGenericParameterTypes()) {
+            if (gt instanceof java.lang.reflect.TypeVariable&lt;?&gt; tv &amp;&amp; tv.getBounds().length &gt; 1) {
+                Class&lt;?&gt; first = toClass(tv.getBounds()[0]);
+                boolean firstSatisfies = true;
+                for (int i = 1; i &lt; tv.getBounds().length; i++) {
+                    if (!toClass(tv.getBounds()[i]).isAssignableFrom(first)) { firstSatisfies = false; break; }
+                }
+                if (!firstSatisfies &amp;&amp; multiBoundConcrete(gt) == null) {
+                    return &quot;testgen: cannot arrange intersection-bounded type parameter &lt;&quot; + tv.getName() + &quot;&gt;&quot;;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; typeBindings(Class&lt;?&gt; sut) {
+        java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; map = new java.util.HashMap&lt;&gt;();
+        collectBindings(sut, map);
+        return map;
+    }
+
+    /** Collect type-var bindings from the SUT's generic superclasses AND generic interfaces
+     *  (e.g. Comparable&amp;lt;Priority&amp;gt; -&amp;gt; T=Priority), recursively. */
+    private static void collectBindings(Class&lt;?&gt; c,
+            java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; map) {
+        if (c == null || c == Object.class) {
+            return;
+        }
+        bindArgs(c.getGenericSuperclass(), map);
+        collectBindings(c.getSuperclass(), map);
+        for (java.lang.reflect.Type it : c.getGenericInterfaces()) {
+            bindArgs(it, map);
+            if (it instanceof java.lang.reflect.ParameterizedType ipt) {
+                collectBindings((Class&lt;?&gt;) ipt.getRawType(), map);
+            } else if (it instanceof Class&lt;?&gt; ic) {
+                collectBindings(ic, map);
+            }
+        }
+    }
+
+    /** Bindings for a collaborator field: SUT-level bindings plus the field's own type args
+     *  (store:Store&amp;lt;String&amp;gt; -&gt; Store's T -&gt; String), so its methods' T returns resolve concretely. */
+    private static java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; fieldBindings(
+            Class&lt;?&gt; sut, FieldMockRef mock) {
+        java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; map = typeBindings(sut);
+        try {
+            bindArgs(mock.declaringClass().getDeclaredField(mock.fieldName()).getGenericType(), map);
+        } catch (NoSuchFieldException ignored) {
+            // field not reflectively found (shouldn't happen) — fall back to SUT-level bindings only
+        }
+        return map;
+    }
+
+    private static void bindArgs(java.lang.reflect.Type t,
+            java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; map) {
+        if (t instanceof java.lang.reflect.ParameterizedType pt) {
+            Class&lt;?&gt; raw = (Class&lt;?&gt;) pt.getRawType();
+            java.lang.reflect.TypeVariable&lt;?&gt;[] vars = raw.getTypeParameters();
+            java.lang.reflect.Type[] args = pt.getActualTypeArguments();
+            for (int i = 0; i &lt; vars.length &amp;&amp; i &lt; args.length; i++) {
+                map.put(vars[i], resolveType(args[i], map));
+            }
+        }
+    }
+
+    private static java.lang.reflect.Type resolveType(java.lang.reflect.Type t,
+            java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; map) {
+        if (t instanceof java.lang.reflect.TypeVariable&lt;?&gt; tv) {
+            java.lang.reflect.Type bound = map.get(tv);
+            if (bound != null &amp;&amp; bound != tv) {
+                return resolveType(bound, map);
+            }
+            java.lang.reflect.Type[] bounds = tv.getBounds();
+            return bounds.length &gt; 0 ? bounds[0] : Object.class;
+        }
+        return t;
+    }
+
+    /** A concrete Class for a collaborator method's generic return, resolving type variables (and T[])
+     *  via the collaborator's bindings; null if it can't be resolved to a concrete non-Object type. */
+    private static Class&lt;?&gt; resolveReturnClass(java.lang.reflect.Type gret,
+            java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; bindings) {
+        if (bindings.isEmpty()) return null;
+        if (gret instanceof java.lang.reflect.TypeVariable&lt;?&gt;) {
+            Class&lt;?&gt; c = toClass(resolveType(gret, bindings));
+            return (c != null &amp;&amp; c != Object.class) ? c : null;
+        }
+        if (gret instanceof java.lang.reflect.GenericArrayType gat
+                &amp;&amp; gat.getGenericComponentType() instanceof java.lang.reflect.TypeVariable&lt;?&gt; comp) {
+            Class&lt;?&gt; cc = toClass(resolveType(comp, bindings));
+            if (cc != null &amp;&amp; cc != Object.class) {
+                return java.lang.reflect.Array.newInstance(cc, 0).getClass();   // e.g. String[].class
+            }
+        }
+        return null;
+    }
+
+    /** True if the generic return is a type variable (or an array of one) — i.e. erased to Object/Object[]. */
+    private static boolean isTypeVarReturn(java.lang.reflect.Type gret) {
+        if (gret instanceof java.lang.reflect.TypeVariable&lt;?&gt;) return true;
+        if (gret instanceof java.lang.reflect.GenericArrayType gat) return isTypeVarReturn(gat.getGenericComponentType());
+        return false;
+    }
+
+    private static Class&lt;?&gt; toClass(java.lang.reflect.Type t) {
+        if (t instanceof Class&lt;?&gt; c) {
+            return c;
+        }
+        if (t instanceof java.lang.reflect.ParameterizedType pt) {
+            return (Class&lt;?&gt;) pt.getRawType();
+        }
+        if (t instanceof java.lang.reflect.GenericArrayType) {
+            return Object[].class;
+        }
+        if (t instanceof java.lang.reflect.TypeVariable&lt;?&gt; tv) {
+            java.lang.reflect.Type[] b = tv.getBounds();
+            return b.length &gt; 0 ? toClass(b[0]) : Object.class;
+        }
+        return Object.class;
+    }
+
+    private static boolean isStaticOnlyClass(Class&lt;?&gt; sut) {
+        return filterInstance(sut.getDeclaredMethods()).isEmpty()
+                &amp;&amp; !filterStatic(sut.getDeclaredMethods()).isEmpty();
+    }
+
+    /** Prefer TypeName.get so arrays (and generics) render correctly. */
+    private static TypeName javaPoetType(Class&lt;?&gt; type) {
+        return TypeName.get(type);
+    }
+
+    /** Concrete impl for a JDK collection/map interface, else null. A mock collection returns
+     *  null from iterator()/entrySet() → SUTs that iterate the arg NPE; a real empty one runs. */
+    private static Class&lt;?&gt; collectionImpl(Class&lt;?&gt; t) {
+        if (!t.isInterface()) return null;
+        if (t == java.util.NavigableMap.class || t == java.util.SortedMap.class) return java.util.TreeMap.class;
+        if (t == java.util.Map.class) return java.util.HashMap.class;
+        if (t == java.util.NavigableSet.class || t == java.util.SortedSet.class) return java.util.TreeSet.class;
+        if (t == java.util.Set.class) return java.util.HashSet.class;
+        if (t == java.util.Queue.class || t == java.util.Deque.class) return java.util.ArrayDeque.class;
+        if (t == java.util.List.class || t == java.util.Collection.class || t == Iterable.class)
+            return java.util.ArrayList.class;
+        return null;
+    }
+
+    /** A permitted, instantiable concrete subtype of a sealed type (recursing through sealed subtiers),
+     *  else null. Sealed types are unmockable (Mockito refuses) — build a permitted impl instead. */
+    private static Class&lt;?&gt; sealedConcrete(Class&lt;?&gt; t) {
+        if (t == null || !t.isSealed()) return null;
+        for (Class&lt;?&gt; sub : t.getPermittedSubclasses()) {
+            if (sub.isSealed()) {
+                Class&lt;?&gt; deeper = sealedConcrete(sub);
+                if (deeper != null) return deeper;
+            } else if (!sub.isInterface() &amp;&amp; !java.lang.reflect.Modifier.isAbstract(sub.getModifiers())) {
+                return sub;   // concrete record/class permitted by the seal
+            }
+        }
+        return null;
+    }
+
+    private static CodeBlock arrangeLine(Class&lt;?&gt; type, String varName, List&lt;MockRef&gt; mocks) {
+        Class&lt;?&gt; sealedImpl = sealedConcrete(type);
+        if (sealedImpl != null) {   // sealed param -&gt; a permitted concrete impl (sealed types are unmockable)
+            return arrangeConcrete(sealedImpl, varName, mocks);
+        }
+        Class&lt;?&gt; coll = collectionImpl(type);
+        if (coll != null) {   // real empty collection, not a mock (mock iterator() == null → NPE)
+            return CodeBlock.of(&quot;$T $L = new $T&lt;&gt;();\n&quot;, ClassName.get(type), varName, ClassName.get(coll));
+        }
+        if (type.isInterface() || (!type.isArray() &amp;&amp; !type.isPrimitive() &amp;&amp; type != Class.class
+                &amp;&amp; (java.lang.reflect.Modifier.isAbstract(type.getModifiers())
+                        || type.getTypeParameters().length &gt; 0))) {   // generic concrete: Instancio can't build raw
+            mocks.add(new MockRef(type, varName));
+            return CodeBlock.of(&quot;$T $L = $T.mock($T.class);\n&quot;,
+                    ClassName.get(type), varName, MOCKITO, ClassName.get(type));
+        }
+        if (type == Class.class) {
+            return CodeBlock.of(&quot;$T&lt;?&gt; $L = $T.class;\n&quot;,
+                    ClassName.get(Class.class), varName, ClassName.get(String.class));
+        }
+        if (type == java.math.BigDecimal.class) {
+            return CodeBlock.of(&quot;$T $L = $T.ZERO;\n&quot;,
+                    ClassName.get(java.math.BigDecimal.class), varName,
+                    ClassName.get(java.math.BigDecimal.class));
+        }
+        if (type.isPrimitive()) {
+            Class&lt;?&gt; boxed = box(type);
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;,
+                    ClassName.get(boxed), varName, INSTANCIO, ClassName.get(boxed));
+        }
+        return arrangeConcrete(type, varName, mocks);
+    }
+
+    private static CodeBlock arrangeConcrete(Class&lt;?&gt; type, String varName, List&lt;MockRef&gt; mocks) {
+        List&lt;Field&gt; ifaceFields = interfaceInstanceFields(type);
+        if (ifaceFields.isEmpty()) {
+            TypeName tn = javaPoetType(type);
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;, tn, varName, INSTANCIO, tn);
+        }
+        CodeBlock.Builder block = CodeBlock.builder();
+        for (Field field : ifaceFields) {
+            String mockVar = varName + &quot;_&quot; + field.getName() + &quot;Mock&quot;;
+            mocks.add(new MockRef(field.getType(), mockVar));
+            block.addStatement(&quot;$T $L = $T.mock($T.class)&quot;,
+                    ClassName.get(field.getType()), mockVar, MOCKITO, ClassName.get(field.getType()));
+        }
+        CodeBlock.Builder chain = CodeBlock.builder().add(&quot;$T $L = $T.of($T.class)&quot;,
+                ClassName.get(type), varName, INSTANCIO, ClassName.get(type));
+        for (Field field : ifaceFields) {
+            String mockVar = varName + &quot;_&quot; + field.getName() + &quot;Mock&quot;;
+            chain.add(&quot;\n    .set($T.field($T.class, $S), $L)&quot;,
+                    SELECT, ClassName.get(field.getDeclaringClass()), field.getName(), mockVar);
+        }
+        chain.add(&quot;\n    .create();\n&quot;);
+        block.add(chain.build());
+        return block.build();
+    }
+
+    private static List&lt;Field&gt; interfaceInstanceFields(Class&lt;?&gt; type) {
+        List&lt;Field&gt; out = new ArrayList&lt;&gt;();
+        for (Field field : instanceFields(type)) {
+            Class&lt;?&gt; ft = field.getType();
+            boolean abstractCls = !ft.isArray() &amp;&amp; !ft.isInterface() &amp;&amp; !ft.isPrimitive()
+                    &amp;&amp; java.lang.reflect.Modifier.isAbstract(ft.getModifiers());   // primitives report isAbstract too
+            if (ft.isInterface() || abstractCls
+                    || (ft.getTypeParameters().length &gt; 0 &amp;&amp; !ft.isArray() &amp;&amp; ft != Class.class)) {
+                out.add(field);
+            }
+        }
+        return out;
+    }
+
+    private static void addDeclaredExceptions(Method method, MethodSpec.Builder testMethod) {
+        for (Class&lt;?&gt; ex : method.getExceptionTypes()) {
+            testMethod.addException(TypeName.get(ex));
+        }
+    }
+
+    private static CodeBlock minimalStubs(MockRef mock) {
+        return minimalStubs(mock, java.util.Map.of());
+    }
+
+    /** Call-site-aware stubs for a collaborator's {@code &lt;T&gt; T m(Class&lt;T&gt;)} factory methods. The SUT
+     *  passes a concrete {@code X.class} that the generic any()-matcher stub can't bind to T (so #37
+     *  returns null -&gt; NPE if the SUT derefs). Here we read the SUT source, find {@code field.m(X.class)}
+     *  calls, and emit {@code when(mock.m(X.class)).thenReturn(&lt;value of X&gt;)} so T resolves per call. */
+    private static CodeBlock factoryStubs(Class&lt;?&gt; sut, Class&lt;?&gt; collab, String fieldName, String mockVar) {
+        CodeBlock.Builder out = CodeBlock.builder();
+        try {
+            Path src = Config.mainSourceRoot().resolve(sut.getName().replace('.', '/') + &quot;.java&quot;);
+            if (!Files.isRegularFile(src)) return out.build();
+            CompilationUnit cu = StaticJavaParser.parse(src);
+            String pkg = sut.getPackageName();
+            java.util.Set&lt;String&gt; seen = new java.util.HashSet&lt;&gt;();
+            for (MethodCallExpr call : cu.findAll(MethodCallExpr.class)) {
+                if (call.getScope().isEmpty()) continue;
+                com.github.javaparser.ast.expr.Expression scope = call.getScope().get();
+                String scopeName = scope instanceof NameExpr ne ? ne.getNameAsString()
+                        : scope instanceof com.github.javaparser.ast.expr.FieldAccessExpr fae ? fae.getNameAsString()
+                        : null;
+                if (!fieldName.equals(scopeName)) continue;
+                int[] pos = {-1};
+                Class&lt;?&gt; x = classArg(call, cu, pkg, pos);   // the single X.class arg + its position
+                if (x == null) continue;
+                Method fm = factoryMethod(collab, call.getNameAsString(), call.getArguments().size(), pos[0]);
+                if (fm == null || !seen.add(call.getNameAsString() + &quot;|&quot; + pos[0] + &quot;|&quot; + x.getName())) continue;
+                out.addStatement(&quot;$T.when($L.$L($L)).thenReturn($L)&quot;,
+                        MOCKITO, mockVar, call.getNameAsString(), factoryMatchers(fm, pos[0], x), stubValue(x));
+            }
+        } catch (Throwable ignored) {
+            // best-effort: on any parse/resolve failure fall back to the generic stub already emitted
+        }
+        return out.build();
+    }
+
+    /** If the call has exactly one {@code X.class} argument, resolve X and record its position; else null. */
+    private static Class&lt;?&gt; classArg(MethodCallExpr call, CompilationUnit cu, String pkg, int[] posOut) {
+        Class&lt;?&gt; x = null;
+        for (int i = 0; i &lt; call.getArguments().size(); i++) {
+            if (call.getArgument(i) instanceof com.github.javaparser.ast.expr.ClassExpr ce) {
+                if (posOut[0] &gt;= 0) return null;   // more than one Class arg — ambiguous, skip
+                posOut[0] = i;
+                x = resolveSimple(cu, pkg, ce.getType().asString());
+            }
+        }
+        return x;
+    }
+
+    /** Matchers for a factory call: eq(X.class) at the Class position, typed any() elsewhere. */
+    private static CodeBlock factoryMatchers(Method fm, int classPos, Class&lt;?&gt; x) {
+        Class&lt;?&gt;[] ps = fm.getParameterTypes();
+        CodeBlock.Builder mb = CodeBlock.builder();
+        for (int i = 0; i &lt; ps.length; i++) {
+            if (i &gt; 0) mb.add(&quot;, &quot;);
+            if (i == classPos) mb.add(&quot;$T.eq($T.class)&quot;, MATCHERS, ClassName.get(x));
+            else mb.add(typedAnyMatcher(ps[i]));
+        }
+        return mb.build();
+    }
+
+    /** A {@code &lt;T&gt; T m(..., Class&lt;T&gt;, ...)} factory method: matching name/arity, type-variable return,
+     *  and a {@code Class} parameter at the position the SUT passed {@code X.class}. */
+    private static Method factoryMethod(Class&lt;?&gt; collab, String name, int argc, int classPos) {
+        for (Method m : collab.getMethods()) {
+            if (m.getName().equals(name) &amp;&amp; m.getParameterCount() == argc
+                    &amp;&amp; classPos &gt;= 0 &amp;&amp; classPos &lt; m.getParameterCount()
+                    &amp;&amp; m.getParameterTypes()[classPos] == Class.class
+                    &amp;&amp; m.getGenericReturnType() instanceof java.lang.reflect.TypeVariable) {
+                return m;
+            }
+        }
+        return null;
+    }
+
+    /** bindings: type-variable -&gt; concrete type, derived from the collaborator reference's parameterized
+     *  type (e.g. field store:Store&amp;lt;String&amp;gt;). Lets a T-returning collaborator method stub the bound
+     *  concrete (String) instead of erased Object -&gt; avoids ClassCastException at the SUT call site. */
+    private static CodeBlock minimalStubs(MockRef mock,
+            java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; bindings) {
+        CodeBlock.Builder stubs = CodeBlock.builder();
+        for (Method m : mock.type.getMethods()) {
+            if (!include(m) || java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                continue;
+            }
+            if (!Config.STUB_THIRD_PARTY &amp;&amp; !isProjectType(m.getDeclaringClass())) {
+                continue;   // internal-only: mock third-party collaborators but don't stub their methods
+            }
+            CodeBlock anyArgs = anyMatchers(m.getParameterTypes());
+            java.lang.reflect.Type gret = m.getGenericReturnType();
+            Class&lt;?&gt; ret = m.getReturnType();
+            Class&lt;?&gt; resolved = resolveReturnClass(gret, bindings);   // bind type-var / T[] via collaborator generics
+            if (resolved != null) ret = resolved;
+            boolean unresolvedTypeVar = isTypeVarReturn(gret) &amp;&amp; (resolved == null);
+            if (ret == void.class) {
+                stubs.addStatement(&quot;$T.doNothing().when($L).$L($L)&quot;,
+                        MOCKITO, mock.varName, m.getName(), anyArgs);
+            } else if (ret.isPrimitive()) {
+                stubs.addStatement(&quot;$T.doReturn($L).when($L).$L($L)&quot;,
+                        MOCKITO, primitiveDefaultExpr(ret), mock.varName, m.getName(), anyArgs);
+            } else if (unresolvedTypeVar) {   // T bound by the call arg (unknowable here): a bare Object cast
+                stubs.addStatement(&quot;$T.doReturn(null).when($L).$L($L)&quot;,   // to the SUT's expected type would CCE; null casts to anything
+                        MOCKITO, mock.varName, m.getName(), anyArgs);
+            } else if (ret != Object.class &amp;&amp; ret.isAssignableFrom(mock.type)) {   // fluent/self-returning: same mock
+                stubs.addStatement(&quot;$T.doReturn($L).when($L).$L($L)&quot;,   // so chained builder calls resolve (RETURNS_SELF)
+                        MOCKITO, mock.varName, mock.varName, m.getName(), anyArgs);
+            } else {
+                // doReturn(...).when(...) takes Object -&gt; sidesteps the thenReturn compile-time
+                // return-type check that fails on erased generic/covariant returns.
+                CodeBlock rv = classReturnStub(gret);   // Class&lt;...&gt; -&gt; X.class (Instancio can't build Class)
+                if (rv == null) rv = optionalReturnStub(gret);   // real present Optional, not a mock
+                if (rv == null) rv = entryReturnStub(gret);   // real Map.entry, not a mock
+                if (rv == null) rv = futureReturnStub(gret);   // real completed future, not a mock
+                if (rv == null) rv = stubValue(ret);
+                stubs.addStatement(&quot;$T.doReturn($L).when($L).$L($L)&quot;,
+                        MOCKITO, rv, mock.varName, m.getName(), anyArgs);
+            }
+        }
+        return stubs.build();
+    }
+
+    /** A real completed future for a method returning CompletableFuture/Future/CompletionStage (a mocked
+     *  one returns null from join()/get() -&gt; NPE); uses the element type, else completes with null. */
+    private static CodeBlock futureReturnStub(java.lang.reflect.Type gret) {
+        Class&lt;?&gt; raw = toClass(gret);
+        if (raw != java.util.concurrent.CompletableFuture.class &amp;&amp; raw != java.util.concurrent.Future.class
+                &amp;&amp; raw != java.util.concurrent.CompletionStage.class) {
+            return null;
+        }
+        ClassName cf = ClassName.get(java.util.concurrent.CompletableFuture.class);
+        if (gret instanceof java.lang.reflect.ParameterizedType pt) {
+            Class&lt;?&gt; elem = toClass(pt.getActualTypeArguments()[0]);
+            if (elem != null &amp;&amp; elem != Object.class) {
+                return CodeBlock.of(&quot;$T.completedFuture($L)&quot;, cf, stubValue(elem));
+            }
+        }
+        return CodeBlock.of(&quot;$T.completedFuture(null)&quot;, cf);
+    }
+
+    /** A real {@code Map.entry(k, v)} for a method returning {@code Map.Entry&lt;K,V&gt;} (a mocked entry
+     *  returns null from getKey()/getValue() -&gt; NPE if derefed); null when not a Map.Entry return. */
+    private static CodeBlock entryReturnStub(java.lang.reflect.Type gret) {
+        if (toClass(gret) != java.util.Map.Entry.class) return null;
+        ClassName map = ClassName.get(java.util.Map.class);
+        if (gret instanceof java.lang.reflect.ParameterizedType pt
+                &amp;&amp; pt.getActualTypeArguments().length == 2) {
+            Class&lt;?&gt; k = toClass(pt.getActualTypeArguments()[0]);
+            Class&lt;?&gt; v = toClass(pt.getActualTypeArguments()[1]);
+            if (k != null &amp;&amp; v != null &amp;&amp; k != Object.class &amp;&amp; v != Object.class) {
+                return CodeBlock.of(&quot;$T.entry($L, $L)&quot;, map, stubValue(k), stubValue(v));
+            }
+        }
+        return CodeBlock.of(&quot;$T.entry(new Object(), new Object())&quot;, map);   // raw: Map.entry rejects null
+    }
+
+    /** A concrete {@code X.class} literal for a method returning {@code Class&lt;...&gt;} (Instancio can't
+     *  build java.lang.Class), using the wildcard/type upper bound; Object.class when raw/unbounded. */
+    private static CodeBlock classReturnStub(java.lang.reflect.Type gret) {
+        if (toClass(gret) != Class.class) return null;
+        Class&lt;?&gt; bound = Object.class;
+        if (gret instanceof java.lang.reflect.ParameterizedType pt) {
+            java.lang.reflect.Type arg = pt.getActualTypeArguments()[0];
+            if (arg instanceof java.lang.reflect.WildcardType wt &amp;&amp; wt.getUpperBounds().length &gt; 0) {
+                bound = toClass(wt.getUpperBounds()[0]);
+            } else {
+                bound = toClass(arg);
+            }
+        }
+        if (bound == null) bound = Object.class;
+        return CodeBlock.of(&quot;$T.class&quot;, ClassName.get(bound));
+    }
+
+    /** A real Optional stub value (present, with the element type) for a method returning Optional/
+     *  OptionalInt/Long/Double, else null. A mocked Optional returns null from get()/map() -&gt; caller
+     *  NPEs; Optional.empty() throws on get(). A present Optional exercises get()/map()/orElse alike. */
+    private static CodeBlock optionalReturnStub(java.lang.reflect.Type gret) {
+        Class&lt;?&gt; raw = toClass(gret);
+        if (raw == java.util.OptionalInt.class) return CodeBlock.of(&quot;$T.of(0)&quot;, raw);
+        if (raw == java.util.OptionalLong.class) return CodeBlock.of(&quot;$T.of(0L)&quot;, raw);
+        if (raw == java.util.OptionalDouble.class) return CodeBlock.of(&quot;$T.of(0.0)&quot;, raw);
+        if (raw != java.util.Optional.class) return null;
+        if (gret instanceof java.lang.reflect.ParameterizedType pt) {
+            Class&lt;?&gt; elem = toClass(pt.getActualTypeArguments()[0]);
+            if (elem != null &amp;&amp; elem != Object.class) {
+                return CodeBlock.of(&quot;$T.of($L)&quot;, java.util.Optional.class, stubValue(elem));
+            }
+        }
+        return CodeBlock.of(&quot;$T.empty()&quot;, java.util.Optional.class);   // element unknown -&gt; empty (still real)
+    }
+
+    /** Safe stub value for a non-void, non-primitive return: mock interfaces/abstract types
+     *  (Instancio cannot instantiate them, so they would throw at runtime), Instancio.create concretes. */
+    private static CodeBlock stubValue(Class&lt;?&gt; ret) {
+        Class&lt;?&gt; sealedImpl = sealedConcrete(ret);
+        if (sealedImpl != null) {   // sealed return -&gt; permitted concrete impl (Mockito can't mock sealed)
+            return CodeBlock.of(&quot;$T.create($T.class)&quot;, INSTANCIO, ClassName.get(sealedImpl));
+        }
+        if (ret.isArray()) {
+            Class&lt;?&gt; comp = ret.getComponentType();
+            if (comp.isInterface() || (!comp.isPrimitive() &amp;&amp; !comp.isArray()
+                    &amp;&amp; java.lang.reflect.Modifier.isAbstract(comp.getModifiers()))) {
+                return CodeBlock.of(&quot;new $T[0]&quot;, ClassName.get(comp));   // Instancio fills iface/abstract elems with null → NPE
+            }
+        }
+        TypeName tn = javaPoetType(ret);
+        Class&lt;?&gt; coll = collectionImpl(ret);
+        if (coll != null) {   // empty real collection: a mocked List returns isEmpty()==false &amp; get(i)==null → NPE
+            return CodeBlock.of(&quot;new $T&lt;&gt;()&quot;, ClassName.get(coll));
+        }
+        // mock interfaces/abstracts AND generic types (Instancio can't build Foo&lt;T&gt;/Optional&lt;T&gt; raw).
+        // arrays report isAbstract()==true but are not mockable — Instancio.create them.
+        boolean mockable = !ret.isArray() &amp;&amp; ret != Class.class   // Class is generic but Mockito refuses to mock it
+                &amp;&amp; (ret.isInterface() || java.lang.reflect.Modifier.isAbstract(ret.getModifiers())
+                        || ret.getTypeParameters().length &gt; 0);
+        if (mockable) {
+            return CodeBlock.of(&quot;$T.mock($T.class)&quot;, MOCKITO, tn);
+        }
+        return CodeBlock.of(&quot;$T.create($T.class)&quot;, INSTANCIO, tn);
+    }
+
+    private static CodeBlock anyMatchers(Class&lt;?&gt;[] params) {
+        if (params.length == 0) {
+            return CodeBlock.of(&quot;&quot;);
+        }
+        CodeBlock.Builder sb = CodeBlock.builder();
+        for (int i = 0; i &lt; params.length; i++) {
+            if (i &gt; 0) {
+                sb.add(&quot;, &quot;);
+            }
+            sb.add(typedAnyMatcher(params[i]));
+        }
+        return sb.build();
+    }
+
+    /** Type-aware matcher: primitives use anyX(); references use any(Type.class) so overloads disambiguate. */
+    private static CodeBlock typedAnyMatcher(Class&lt;?&gt; p) {
+        if (p == int.class)     return CodeBlock.of(&quot;$T.anyInt()&quot;, MATCHERS);
+        if (p == long.class)    return CodeBlock.of(&quot;$T.anyLong()&quot;, MATCHERS);
+        if (p == double.class)  return CodeBlock.of(&quot;$T.anyDouble()&quot;, MATCHERS);
+        if (p == float.class)   return CodeBlock.of(&quot;$T.anyFloat()&quot;, MATCHERS);
+        if (p == short.class)   return CodeBlock.of(&quot;$T.anyShort()&quot;, MATCHERS);
+        if (p == byte.class)    return CodeBlock.of(&quot;$T.anyByte()&quot;, MATCHERS);
+        if (p == char.class)    return CodeBlock.of(&quot;$T.anyChar()&quot;, MATCHERS);
+        if (p == boolean.class) return CodeBlock.of(&quot;$T.anyBoolean()&quot;, MATCHERS);
+        return CodeBlock.of(&quot;$T.any($T.class)&quot;, MATCHERS, javaPoetType(p));
+    }
+
+    private static String primitiveDefaultExpr(Class&lt;?&gt; prim) {
+        if (prim == boolean.class) return &quot;false&quot;;
+        if (prim == char.class) return &quot;'\\0'&quot;;
+        if (prim == long.class) return &quot;0L&quot;;
+        if (prim == float.class) return &quot;0f&quot;;
+        if (prim == double.class) return &quot;0.0&quot;;
+        if (prim == byte.class) return &quot;(byte) 0&quot;;     // doReturn(int 0) on byte-returning mock -&gt; WrongTypeOfReturnValue
+        if (prim == short.class) return &quot;(short) 0&quot;;   // same for short
+        return &quot;0&quot;;   // int
+    }
+
+    private static List&lt;Method&gt; contractInstanceMethods(Class&lt;?&gt; sut) {
+        List&lt;Method&gt; declared = filterInstance(sut.getDeclaredMethods());
+        if (!isThin(declared)) {
+            return dedupe(declared);
+        }
+        LinkedHashSet&lt;Method&gt; contract = new LinkedHashSet&lt;&gt;(declared);
+        for (Class&lt;?&gt; iface : allInterfaces(sut)) {
+            contract.addAll(filterInstance(iface.getMethods()));
+        }
+        Class&lt;?&gt; parent = sut.getSuperclass();
+        if (parent != null &amp;&amp; parent != Object.class) {
+            contract.addAll(filterInstance(parent.getDeclaredMethods()));
+        }
+        return dedupe(new ArrayList&lt;&gt;(contract));
+    }
+
+    private static List&lt;Method&gt; contractStaticMethods(Class&lt;?&gt; sut) {
+        List&lt;Method&gt; declared = filterStatic(sut.getDeclaredMethods());
+        if (!declared.isEmpty()) {
+            return dedupe(declared);
+        }
+        LinkedHashSet&lt;Method&gt; contract = new LinkedHashSet&lt;&gt;();
+        for (Class&lt;?&gt; iface : allInterfaces(sut)) {
+            contract.addAll(filterStatic(iface.getMethods()));
+        }
+        Class&lt;?&gt; parent = sut.getSuperclass();
+        if (parent != null &amp;&amp; parent != Object.class) {
+            contract.addAll(filterStatic(parent.getDeclaredMethods()));
+        }
+        return dedupe(new ArrayList&lt;&gt;(contract));
+    }
+
+    private static boolean isThin(List&lt;Method&gt; declared) {
+        if (declared.isEmpty()) {
+            return true;
+        }
+        for (Method m : declared) {
+            if (!looksLikeAccessor(m)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean looksLikeAccessor(Method m) {
+        if (m.getParameterCount() != 0 || m.getReturnType() == void.class) {
+            return false;
+        }
+        String n = m.getName();
+        return n.startsWith(&quot;get&quot;) || n.startsWith(&quot;is&quot;);
+    }
+
+    private static List&lt;Class&lt;?&gt;&gt; allInterfaces(Class&lt;?&gt; type) {
+        LinkedHashSet&lt;Class&lt;?&gt;&gt; out = new LinkedHashSet&lt;&gt;();
+        Class&lt;?&gt; cur = type;
+        while (cur != null &amp;&amp; cur != Object.class) {
+            out.addAll(Arrays.asList(cur.getInterfaces()));
+            for (Class&lt;?&gt; iface : cur.getInterfaces()) {
+                collectInterfaces(iface, out);
+            }
+            cur = cur.getSuperclass();
+        }
+        return new ArrayList&lt;&gt;(out);
+    }
+
+    private static void collectInterfaces(Class&lt;?&gt; iface, Set&lt;Class&lt;?&gt;&gt; out) {
+        if (!out.add(iface)) {
+            return;
+        }
+        for (Class&lt;?&gt; parent : iface.getInterfaces()) {
+            collectInterfaces(parent, out);
+        }
+    }
+
+    private static List&lt;Method&gt; filterInstance(Method[] methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        for (Method m : methods) {
+            if (include(m) &amp;&amp; !java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static List&lt;Method&gt; filterStatic(Method[] methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        for (Method m : methods) {
+            if (include(m) &amp;&amp; java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static List&lt;Method&gt; dedupe(List&lt;Method&gt; methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        Set&lt;String&gt; seen = new HashSet&lt;&gt;();
+        for (Method m : methods) {
+            String key = m.getName() + Arrays.toString(m.getParameterTypes());
+            if (seen.add(key)) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static boolean include(Method m) {
+        int mod = m.getModifiers();
+        if (!java.lang.reflect.Modifier.isPublic(mod)) {
+            return false;
+        }
+        if (m.isSynthetic() || m.isBridge()) {
+            return false;
+        }
+        String n = m.getName();
+        if (n.equals(&quot;equals&quot;) || n.equals(&quot;hashCode&quot;) || n.equals(&quot;toString&quot;) || n.equals(&quot;getClass&quot;)
+                || n.equals(&quot;notify&quot;) || n.equals(&quot;notifyAll&quot;) || n.equals(&quot;wait&quot;)) {
+            return false;
+        }
+        Class&lt;?&gt; dc = m.getDeclaringClass();
+        if (dc == Enum.class
+                || (dc.isEnum() &amp;&amp; (n.equals(&quot;values&quot;) || n.equals(&quot;valueOf&quot;) || n.equals(&quot;compareTo&quot;)))) {
+            return false;   // synthesized enum values()/valueOf/compareTo + java.lang.Enum internals
+        }
+        return true;
+    }
+
+    private static String safeName(Method m) {
+        String base = m.getName();
+        if (m.getParameterCount() == 0) {
+            return base;
+        }
+        return base + &quot;_&quot; + m.getParameterCount() + &quot;args&quot;;
+    }
+
+    private static String uniqueName(String base, Set&lt;String&gt; usedNames) {
+        String name = base;
+        int i = 2;
+        while (!usedNames.add(name)) {
+            name = base + &quot;_&quot; + i++;
+        }
+        return name;
+    }
+
+    private static String simpleParamName(Parameter p) {
+        String n = p.getName();
+        if (n == null || n.startsWith(&quot;arg&quot;)) {
+            n = p.getType().getSimpleName();
+        }
+        return n.replaceAll(&quot;[^A-Za-z0-9_]&quot;, &quot;&quot;);
+    }
+
+    private static Class&lt;?&gt; box(Class&lt;?&gt; primitive) {
+        if (primitive == boolean.class) return Boolean.class;
+        if (primitive == int.class) return Integer.class;
+        if (primitive == long.class) return Long.class;
+        if (primitive == double.class) return Double.class;
+        if (primitive == float.class) return Float.class;
+        if (primitive == short.class) return Short.class;
+        if (primitive == byte.class) return Byte.class;
+        if (primitive == char.class) return Character.class;
+        return primitive;
+    }
+
+    // ---- static / construction isolation: mockStatic / mockConstruction in try-with-resources ----
+
+    /** Parse the SUT method body for static-call targets and new'd types (project types only). */
+    private static SutStatics analyzeStaticsAndNew(Class&lt;?&gt; sut, Method method) {
+        try {
+            Path src = Config.mainSourceRoot().resolve(sut.getName().replace('.', '/') + &quot;.java&quot;);
+            if (!Files.isRegularFile(src)) {
+                return null;
+            }
+            CompilationUnit cu = StaticJavaParser.parse(src);
+            String pkg = sut.getPackageName();
+            MethodDeclaration target = null;
+            for (MethodDeclaration md : cu.findAll(MethodDeclaration.class)) {
+                if (md.getNameAsString().equals(method.getName())
+                        &amp;&amp; md.getParameters().size() == method.getParameterCount()) {
+                    target = md;
+                    break;
+                }
+            }
+            if (target == null) {
+                return null;
+            }
+            LinkedHashSet&lt;Class&lt;?&gt;&gt; statics = new LinkedHashSet&lt;&gt;();
+            LinkedHashSet&lt;Class&lt;?&gt;&gt; constructed = new LinkedHashSet&lt;&gt;();
+            for (MethodCallExpr call : target.findAll(MethodCallExpr.class)) {
+                if (call.getScope().isPresent()) {
+                    com.github.javaparser.ast.expr.Expression s = call.getScope().get();
+                    String q = null;
+                    if (s instanceof NameExpr ne &amp;&amp; !ne.getNameAsString().isEmpty()
+                            &amp;&amp; Character.isUpperCase(ne.getNameAsString().charAt(0))) {
+                        q = ne.getNameAsString();                       // simple: Class.method()
+                    } else if (s instanceof com.github.javaparser.ast.expr.FieldAccessExpr fae) {
+                        q = fae.toString();                             // fully-qualified: com.pkg.Class.method()
+                    }
+                    if (q != null) {
+                        Class&lt;?&gt; c = q.contains(&quot;.&quot;) ? tryLoad(q) : resolveSimple(cu, pkg, q);
+                        if (c != null &amp;&amp; isProjectType(c) &amp;&amp; !c.equals(sut)) {
+                            statics.add(c);
+                        }
+                    }
+                } else {
+                    String mname = call.getNameAsString();              // no scope: static import?
+                    for (ImportDeclaration imp : cu.getImports()) {
+                        if (imp.isStatic() &amp;&amp; !imp.isAsterisk() &amp;&amp; imp.getNameAsString().endsWith(&quot;.&quot; + mname)) {
+                            String cls = imp.getNameAsString().substring(0, imp.getNameAsString().lastIndexOf('.'));
+                            Class&lt;?&gt; c = tryLoad(cls);
+                            if (c != null &amp;&amp; isProjectType(c) &amp;&amp; !c.equals(sut)) {
+                                statics.add(c);
+                            }
+                        }
+                    }
+                }
+            }
+            for (ObjectCreationExpr oce : target.findAll(ObjectCreationExpr.class)) {
+                Class&lt;?&gt; c = resolveSimple(cu, pkg, oce.getType().getNameAsString());
+                if (c != null &amp;&amp; isProjectType(c) &amp;&amp; !c.equals(sut)) {   // never mock-construct the SUT's own type
+                    constructed.add(c);
+                }
+            }
+            return new SutStatics(statics, constructed);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static Class&lt;?&gt; resolveSimple(CompilationUnit cu, String sutPkg, String simple) {
+        for (ImportDeclaration imp : cu.getImports()) {
+            if (!imp.isAsterisk() &amp;&amp; imp.getNameAsString().endsWith(&quot;.&quot; + simple)) {
+                Class&lt;?&gt; c = tryLoad(imp.getNameAsString());
+                if (c != null) {
+                    return c;
+                }
+            }
+        }
+        Class&lt;?&gt; c = tryLoad(sutPkg + &quot;.&quot; + simple);
+        return (c != null) ? c : tryLoad(&quot;java.lang.&quot; + simple);
+    }
+
+    private static Class&lt;?&gt; tryLoad(String fqn) {
+        try {
+            return Class.forName(fqn, false, TestSkeletonGenerator.class.getClassLoader());
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** try-with-resources header: one MockedStatic per static target, one MockedConstruction per new'd type. */
+    private static CodeBlock mockScopeResources(SutStatics st) {
+        CodeBlock.Builder r = CodeBlock.builder();
+        boolean first = true;
+        for (Class&lt;?&gt; x : st.staticTargets()) {
+            if (!first) {
+                r.add(&quot;;\n&quot;);
+            }
+            first = false;
+            r.add(&quot;$T&lt;$T&gt; $L = $T.mockStatic($T.class)&quot;,
+                    MOCKED_STATIC, ClassName.get(x), msVar(x), MOCKITO, ClassName.get(x));
+        }
+        for (Class&lt;?&gt; y : st.constructedTypes()) {
+            if (!first) {
+                r.add(&quot;;\n&quot;);
+            }
+            first = false;
+            CodeBlock init = minimalStubs(new MockRef(y, &quot;cm&quot;));   // stub the constructed mock's own methods
+            if (init.isEmpty()) {
+                r.add(&quot;$T&lt;$T&gt; $L = $T.mockConstruction($T.class)&quot;,
+                        MOCKED_CONSTRUCTION, ClassName.get(y), mcVar(y), MOCKITO, ClassName.get(y));
+            } else {   // 2-arg form: else new T() returns a mock whose methods return null -&gt; caller NPEs
+                r.add(&quot;$T&lt;$T&gt; $L = $T.mockConstruction($T.class, (cm, context) -&gt; {\n$&gt;$L$&lt;})&quot;,
+                        MOCKED_CONSTRUCTION, ClassName.get(y), mcVar(y), MOCKITO, ClassName.get(y), init);
+            }
+        }
+        return r.build();
+    }
+
+    /** Stub each static target's non-void static methods so the isolated call graph does not NPE. */
+    private static void emitStaticStubs(MethodSpec.Builder b, SutStatics st, Class&lt;?&gt; sut) {
+        for (Class&lt;?&gt; x : st.staticTargets()) {
+            for (Method sm : x.getDeclaredMethods()) {
+                if (!java.lang.reflect.Modifier.isStatic(sm.getModifiers()) || !include(sm)) {
+                    continue;
+                }
+                java.lang.reflect.Type gret = sm.getGenericReturnType();
+                Class&lt;?&gt; ret = sm.getReturnType();
+                if (ret == void.class) {
+                    continue;
+                }
+                CodeBlock matchers = anyMatchers(sm.getParameterTypes());
+                if (ret.isPrimitive()) {
+                    b.addStatement(&quot;$L.when(() -&gt; $T.$L($L)).thenReturn($L)&quot;,
+                            msVar(x), ClassName.get(x), sm.getName(), matchers, primitiveDefaultExpr(ret));
+                } else if (isTypeVarReturn(gret)) {   // unresolved static type-var: null (a bare Object would CCE)
+                    b.addStatement(&quot;$L.when(() -&gt; $T.$L($L)).thenReturn(null)&quot;,
+                            msVar(x), ClassName.get(x), sm.getName(), matchers);
+                } else {
+                    CodeBlock rv = classReturnStub(gret);   // Class&lt;...&gt; -&gt; X.class
+                    if (rv == null) rv = optionalReturnStub(gret);   // real Optional, not mock
+                    if (rv == null) rv = entryReturnStub(gret);   // real Map.entry, not mock
+                    if (rv == null) rv = futureReturnStub(gret);   // real completed future, not mock
+                    if (rv == null) rv = stubValue(ret);
+                    b.addStatement(&quot;$L.when(() -&gt; $T.$L($L)).thenReturn($L)&quot;,
+                            msVar(x), ClassName.get(x), sm.getName(), matchers, rv);
+                }
+            }
+            b.addCode(staticFactoryStubs(sut, x));   // call-site X.class binds a static &lt;T&gt; T m(Class&lt;T&gt;) factory
+        }
+    }
+
+    /** Static analog of {@link #factoryStubs}: for {@code X.m(Y.class)} call sites on a static factory,
+     *  emit {@code msVar.when(() -&gt; X.m(eq(Y.class))).thenReturn(&lt;value Y&gt;)}. */
+    private static CodeBlock staticFactoryStubs(Class&lt;?&gt; sut, Class&lt;?&gt; collab) {
+        CodeBlock.Builder out = CodeBlock.builder();
+        try {
+            Path src = Config.mainSourceRoot().resolve(sut.getName().replace('.', '/') + &quot;.java&quot;);
+            if (!Files.isRegularFile(src)) return out.build();
+            CompilationUnit cu = StaticJavaParser.parse(src);
+            String pkg = sut.getPackageName();
+            java.util.Set&lt;String&gt; seen = new java.util.HashSet&lt;&gt;();
+            for (MethodCallExpr call : cu.findAll(MethodCallExpr.class)) {
+                if (call.getScope().isEmpty()) continue;
+                com.github.javaparser.ast.expr.Expression scope = call.getScope().get();
+                String scopeName = scope instanceof NameExpr ne ? ne.getNameAsString() : scope.toString();
+                if (!collab.getSimpleName().equals(scopeName) &amp;&amp; !collab.getName().equals(scopeName)) continue;
+                int[] pos = {-1};
+                Class&lt;?&gt; y = classArg(call, cu, pkg, pos);
+                if (y == null) continue;
+                Method fm = factoryMethod(collab, call.getNameAsString(), call.getArguments().size(), pos[0]);
+                if (fm == null || !java.lang.reflect.Modifier.isStatic(fm.getModifiers())) continue;
+                if (!seen.add(call.getNameAsString() + &quot;|&quot; + pos[0] + &quot;|&quot; + y.getName())) continue;
+                out.addStatement(&quot;$L.when(() -&gt; $T.$L($L)).thenReturn($L)&quot;,
+                        msVar(collab), ClassName.get(collab), call.getNameAsString(),
+                        factoryMatchers(fm, pos[0], y), stubValue(y));
+            }
+        } catch (Throwable ignored) {
+            // best-effort
+        }
+        return out.build();
+    }
+
+    private static String msVar(Class&lt;?&gt; x) {
+        return &quot;ms&quot; + x.getSimpleName();
+    }
+
+    private static String mcVar(Class&lt;?&gt; y) {
+        return &quot;mc&quot; + y.getSimpleName();
+    }
+
+    private record SutStatics(Set&lt;Class&lt;?&gt;&gt; staticTargets, Set&lt;Class&lt;?&gt;&gt; constructedTypes) {}
+
+    private record MockRef(Class&lt;?&gt; type, String varName) {}
+
+    private record FieldMockRef(Class&lt;?&gt; type, String varName, Class&lt;?&gt; declaringClass, String fieldName,
+                                boolean skipStub) {}
+}
+</pre>
+<h3>Prompt (v0.3 fill-assertions, current)</h3>
+<pre># testgen prompt v0.3 — distilled &quot;fill one assertion&quot; (CURRENT)
+
+- **Version:** 0.3 — current production prompt.
+- **Date:** 2026-07-20, testgen/llm commit `834f4e2`. NOT shared via spring.htm.
+- **Nature:** minimal — compute the expected output from the method body, emit ONE `assertEquals`. Static + literal scope.
+- **Live copy the harness reads:** `../../../testgen/llm/fill_prompt2.md` (keep in sync).
+- **Lineage:** v0.1 (big arrange-upgrade, shared 07-14) -&gt; v0.2 (DUO gap-kit, shared 07-15) -&gt; v0.3 (distilled).
+
+---
+
+
+The method below belongs to class {{SUT}}. Write one JUnit5 assertion using a literal input and the
+exact expected output you compute from the body. Call the static method as {{SUT}}.{{NAME}}(...). Output only:
+Assertions.assertEquals(&lt;expected&gt;, {{SUT}}.{{NAME}}(&lt;literal args&gt;));
+
+{{SUT}}.{{NAME}}:
+{{METHOD_SRC}}
+</pre>
+
 </body>
 
 </html>
