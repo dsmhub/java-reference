@@ -302,23 +302,3948 @@ div.WordSection1
 
 <p class=MsoNormal>&nbsp;</p>
 
-<p class=MsoNormal>testgen v3.5 (RC) &mdash; 2026-08-10 &mdash; SMC fixture family. Code as verbatim files, nothing embedded in this page:</p>
+<h2>testgen v3.5 (RC) &ndash; changes since v3.4 (2026-08-10)</h2>
+<p>SMC fixture family: the scanner decides which classes touch a shared mutable singleton (logger/config), the generator builds a delegate-swap fixture for each (shared testsupport file or nested class), and two retrofit tools add the same protection to existing tests and flip placement. Prompt unchanged (v0.3). Raw source below, escaped for HTML only; whitespace exact.</p>
+<h3>CHANGED vs v3.4</h3>
+<h4>TestSkeletonGenerator.java</h4>
+<pre>package com.testgen;
 
-<p class=MsoNormal><a href="testgen-v3.5/README.txt">README.txt</a> (what changed, what is new)</p>
+import com.config.Config;
+import com.testgen.fixtures.FixtureGenerator;
+import com.testgen.fixtures.SMCFixtureScanner;
 
-<p class=MsoNormal>Changed: <a href="testgen-v3.5/TestSkeletonGenerator.java">TestSkeletonGenerator.java</a> &middot;
-<a href="testgen-v3.5/Runner.java">Runner.java</a> &middot;
-<a href="testgen-v3.5/Config.java">Config.java</a> &middot;
-<a href="testgen-v3.5/graphs/CallChainScanner.java">graphs/CallChainScanner.java</a></p>
+import com.squareup.javapoet.AnnotationSpec;
+import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.CodeBlock;
+import com.squareup.javapoet.FieldSpec;
+import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.MethodSpec;
+import com.squareup.javapoet.TypeName;
+import com.squareup.javapoet.TypeSpec;
 
-<p class=MsoNormal>New: <a href="testgen-v3.5/fixtures/SMCFixtureScanner.java">fixtures/SMCFixtureScanner.java</a> &middot;
-<a href="testgen-v3.5/fixtures/FixtureGenerator.java">fixtures/FixtureGenerator.java</a> &middot;
-<a href="testgen-v3.5/fixtures/retrofit/InjectSMCFixture.java">fixtures/retrofit/InjectSMCFixture.java</a> &middot;
-<a href="testgen-v3.5/fixtures/retrofit/SwitchSMCFixture.java">fixtures/retrofit/SwitchSMCFixture.java</a> &middot;
-<a href="testgen-v3.5/tools/inject_smc_fixture.py">tools/inject_smc_fixture.py</a></p>
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
 
-<p class=MsoNormal>&nbsp;</p>
+import javax.lang.model.element.Modifier;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 
+/**
+ * Batch skeleton generator:
+ * - SUT arranged via `new` on a usable public ctor (TG-NOINSTSUT); Instancio only for the
+ *   documented fallbacks (no/self-referencing public ctor, ctor fires project statics)
+ * - Instancio for concrete collaborator/value args (unchanged v3.4 behaviour)
+ * - Mockito.mock for interfaces; minimal stubbing for smoke act
+ * - instance + static in same class; static-only SUTs get static tests only
+ * - SUT contract methods: declared; if empty/thin &#8594; interfaces + immediate parent
+ * - mirrors declared checked exceptions on generated @Test methods
+ * - skip if *{suffix} already exists
+ *
+ * Array TypeName via {@link TypeName#get(java.lang.reflect.Type)} (javaPoetType).
+ */
+public final class TestSkeletonGenerator {
+
+    private static final ClassName INSTANCIO = ClassName.get(&quot;org.instancio&quot;, &quot;Instancio&quot;);
+    private static final ClassName SELECT = ClassName.get(&quot;org.instancio&quot;, &quot;Select&quot;);
+    private static final ClassName MOCKITO = ClassName.get(&quot;org.mockito&quot;, &quot;Mockito&quot;);
+    private static final ClassName MATCHERS = ClassName.get(&quot;org.mockito&quot;, &quot;ArgumentMatchers&quot;);
+    private static final ClassName TEST = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Test&quot;);
+    private static final ClassName BEFORE_EACH = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;BeforeEach&quot;);
+    private static final ClassName AFTER_EACH = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;AfterEach&quot;);
+    private static final ClassName DISABLED = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Disabled&quot;);
+    private static final ClassName ASSERTIONS = ClassName.get(&quot;org.junit.jupiter.api&quot;, &quot;Assertions&quot;);
+    private static final ClassName MOCKED_STATIC = ClassName.get(&quot;org.mockito&quot;, &quot;MockedStatic&quot;);
+    private static final ClassName MOCKED_CONSTRUCTION = ClassName.get(&quot;org.mockito&quot;, &quot;MockedConstruction&quot;);
+
+    private TestSkeletonGenerator() {}
+
+    public static void run() throws Exception {
+        Path testSourceRoot = Config.testSourceRoot();
+        String suffix = Config.TEST_NAME_SUFFIX;
+        List&lt;String&gt; classes = Config.readClasses();
+
+        for (String fqcn : classes) {
+            try {
+                writeSkeleton(Class.forName(fqcn, false, TestSkeletonGenerator.class.getClassLoader()),
+                        testSourceRoot, suffix);
+            } catch (Throwable t) {
+                String why = (t.getMessage() != null) ? t.getMessage() : t.toString();
+                System.out.println(&quot;SKIP (unresolved &quot; + t.getClass().getSimpleName() + &quot;: &quot; + why + &quot;): &quot; + fqcn);
+            }
+        }
+    }
+
+    static void writeSkeleton(Class&lt;?&gt; sut, Path testSourceRoot, String suffix) throws Exception {
+        String testPackage = sut.getPackageName();
+        String testSimpleName = sut.getSimpleName() + suffix;
+        Path target = testSourceRoot
+                .resolve(testPackage.replace(&#x27;.&#x27;, &#x27;/&#x27;))
+                .resolve(testSimpleName + &quot;.java&quot;);
+        if (Files.exists(target)) {
+            System.out.println(&quot;SKIP (exists): &quot; + target);
+            return;
+        }
+
+        boolean staticOnly = isStaticOnlyClass(sut);
+        // BUG-2a (agent5 merge): an enum with an abstract method reports isAbstract()==true but IS
+        // instantiable via its constants (Instancio yields a constant) — don&#x27;t skip its instance methods.
+        boolean abstractSut = !sut.isInterface() &amp;&amp; !sut.isEnum()
+                &amp;&amp; java.lang.reflect.Modifier.isAbstract(sut.getModifiers());
+        boolean genericSut = sut.getTypeParameters().length &gt; 0;   // Instancio can&#x27;t build Foo&lt;T&gt; without a type witness
+        boolean ifaceSut = sut.isInterface();
+        boolean uninstantiable = abstractSut || genericSut || ifaceSut;
+        if (uninstantiable) {
+            System.out.println(&quot;WARN &quot; + (ifaceSut ? &quot;interface&quot; : genericSut ? &quot;generic&quot; : &quot;abstract&quot;)
+                    + &quot; SUT — instance tests skipped (cannot instantiate reliably): &quot; + sut.getName());
+        }
+        List&lt;Method&gt; instanceMethods =
+                (staticOnly || uninstantiable) ? List.of() : contractInstanceMethods(sut);
+        List&lt;Method&gt; staticMethods = contractStaticMethods(sut);
+        boolean staticPrefix = !staticOnly &amp;&amp; !instanceMethods.isEmpty();
+
+        TypeSpec.Builder testClass = TypeSpec.classBuilder(testSimpleName)
+                .addModifiers(Modifier.PUBLIC)
+                .addJavadoc(
+                        &quot;AUTO-GENERATED arrange skeleton for $L.\n&quot;
+                                + &quot;Instancio SUT + locals per test; real assertions to be filled in after generation.\n&quot;,
+                        sut.getName());
+
+        // TG-BOILERDET: facades the SUT-set consumes get deterministic delegate-swap fixtures;
+        // no facade detected -&gt; every path below is byte-identical to the v3.4 output.
+        List&lt;SMCFixtureScanner.Facade&gt; facades = SMCFixtureScanner.detect(sut);
+        Set&lt;Class&lt;?&gt;&gt; facadeSuppress = SMCFixtureScanner.facadeClasses(facades);
+        if (!facades.isEmpty()) {
+            for (SMCFixtureScanner.Facade facade : facades) {
+                ClassName fixtureName;
+                if (&quot;NESTED&quot;.equals(Config.FIXTURE_PLACEMENT)) {
+                    // TWEAK-POINT (FIXTURE_PLACEMENT=NESTED): same fixture, nested inside this test class.
+                    testClass.addType(FixtureGenerator.nestedType(facade));
+                    fixtureName = ClassName.get(testPackage, testSimpleName,
+                            FixtureGenerator.fixtureSimpleName(facade));
+                } else {
+                    fixtureName = FixtureGenerator.write(facade, testSourceRoot);
+                }
+                testClass.addField(FieldSpec.builder(fixtureName, fixtureFieldName(facade),
+                                Modifier.PRIVATE, Modifier.FINAL)
+                        .initializer(&quot;new $T()&quot;, fixtureName)
+                        .build());
+            }
+        }
+
+        if (!instanceMethods.isEmpty()) {
+            testClass.addField(FieldSpec.builder(ClassName.get(sut), &quot;sut&quot;, Modifier.PRIVATE).build());
+        }
+        if (!facades.isEmpty()) {
+            testClass.addMethod(boilerplateSetup(sut, facades, !instanceMethods.isEmpty()));
+            testClass.addMethod(boilerplateTearDown(facades));
+        } else if (!instanceMethods.isEmpty()) {
+            testClass.addMethod(setUpMethod(sut));
+        }
+        if (!instanceMethods.isEmpty()) {
+            Set&lt;String&gt; usedNames = new HashSet&lt;&gt;();
+            for (Method m : instanceMethods) {
+                testClass.addMethod(instanceTest(sut, m, usedNames, facadeSuppress));
+            }
+        }
+        if (!staticMethods.isEmpty()) {
+            Set&lt;String&gt; usedNames = instanceMethods.stream()
+                    .map(TestSkeletonGenerator::safeName)
+                    .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+            for (Method m : staticMethods) {
+                testClass.addMethod(staticTest(sut, m, staticPrefix, usedNames, facadeSuppress));
+            }
+        }
+        if (instanceMethods.isEmpty() &amp;&amp; staticMethods.isEmpty()) {
+            System.out.println(&quot;WARN no public methods: &quot; + sut.getName());
+            testClass.addJavadoc(&quot;No public methods discovered.\n&quot;);
+        }
+
+        JavaFile.builder(testPackage, testClass.build())
+                .addFileComment(&quot;AUTO-GENERATED by testgen TestSkeletonGenerator&quot;)
+                .build()
+                .writeTo(testSourceRoot);
+
+        System.out.println(&quot;Wrote &quot; + testPackage + &quot;.&quot; + testSimpleName
+                + &quot; (instance=&quot; + instanceMethods.size() + &quot;, static=&quot; + staticMethods.size() + &quot;)&quot;);
+    }
+
+    private static MethodSpec setUpMethod(Class&lt;?&gt; sut) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(&quot;setUp&quot;)
+                .addAnnotation(BEFORE_EACH)
+                .addModifiers(Modifier.PUBLIC)
+                .addException(Exception.class);   // stubbed collaborator methods may throw checked exceptions
+        arrangeInto(b, sut);
+        return b.build();
+    }
+
+    /**
+     * TG-NOINSTSUT: the public constructor chosen for arranging the SUT via {@code new}, or null
+     * when Instancio must stay (no public ctor / self-referencing param / ctor-or-field-initializer
+     * fires project statics that {@code new} would execute for real).
+     * Choice among usable ctors: max parameter count (DI-shaped), tie-broken deterministically on
+     * the parameter-type signature string.
+     */
+    private static java.lang.reflect.Constructor&lt;?&gt; noInstSutCtor(Class&lt;?&gt; sut) {
+        List&lt;java.lang.reflect.Constructor&lt;?&gt;&gt; usable = new ArrayList&lt;&gt;();
+        for (java.lang.reflect.Constructor&lt;?&gt; c : sut.getConstructors()) {
+            if (!ctorSelfReferencing(sut, c) &amp;&amp; !ctorFiresProjectStatics(sut, c)) {
+                usable.add(c);
+            }
+        }
+        if (usable.isEmpty()) {
+            return null;
+        }
+        usable.sort(java.util.Comparator
+                .comparingInt((java.lang.reflect.Constructor&lt;?&gt; c) -&gt; c.getParameterCount()).reversed()
+                .thenComparing(TestSkeletonGenerator::ctorSignature));
+        return usable.get(0);
+    }
+
+    /** A ctor taking the SUT&#x27;s own type cannot be arranged without recursing — Instancio stays. */
+    private static boolean ctorSelfReferencing(Class&lt;?&gt; sut, java.lang.reflect.Constructor&lt;?&gt; c) {
+        for (Class&lt;?&gt; pt : c.getParameterTypes()) {
+            if (pt.equals(sut)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Statics scan of ONE class&#x27;s ctors (paramCount -1 = all) + instance-field initializers. */
+    private static boolean classFiresProjectStatics(Class&lt;?&gt; owner, Class&lt;?&gt; sut, int paramCount) {
+        try {
+            Path src = Config.mainSourceRoot().resolve(owner.getName().replace(&#x27;.&#x27;, &#x27;/&#x27;) + &quot;.java&quot;);
+            if (!Files.isRegularFile(src)) {
+                return false;
+            }
+            CompilationUnit cu = StaticJavaParser.parse(src);
+            String pkg = owner.getPackageName();
+
+            List&lt;com.github.javaparser.ast.Node&gt; scopes = new ArrayList&lt;&gt;();
+            for (com.github.javaparser.ast.body.ConstructorDeclaration cd
+                    : cu.findAll(com.github.javaparser.ast.body.ConstructorDeclaration.class)) {
+                if (cd.getNameAsString().equals(owner.getSimpleName())
+                        &amp;&amp; (paramCount &lt; 0 || cd.getParameters().size() == paramCount)) {
+                    scopes.add(cd);
+                }
+            }
+            for (com.github.javaparser.ast.body.FieldDeclaration fd
+                    : cu.findAll(com.github.javaparser.ast.body.FieldDeclaration.class)) {
+                if (!fd.isStatic()) {
+                    scopes.add(fd);   // instance-field initializers also run on `new`
+                }
+            }
+            for (com.github.javaparser.ast.body.InitializerDeclaration id
+                    : cu.findAll(com.github.javaparser.ast.body.InitializerDeclaration.class)) {
+                if (!id.isStatic()) {
+                    scopes.add(id);   // instance initializer blocks also run on `new` (a11 break #3)
+                }
+            }
+
+            // Unscoped calls in a ctor/init are the SUT&#x27;s own methods; their bodies run on `new`
+            // too, so walk them one level (a11 break #2). Depth 1 over-retains; it never misses
+            // the direct case and the differential backstops deeper chains.
+            List&lt;com.github.javaparser.ast.Node&gt; expanded = new ArrayList&lt;&gt;(scopes);
+            for (com.github.javaparser.ast.Node scope : scopes) {
+                for (MethodCallExpr call : scope.findAll(MethodCallExpr.class)) {
+                    if (call.getScope().isEmpty()) {
+                        for (com.github.javaparser.ast.body.MethodDeclaration md
+                                : cu.findAll(com.github.javaparser.ast.body.MethodDeclaration.class)) {
+                            if (md.getNameAsString().equals(call.getNameAsString())) {
+                                expanded.add(md);
+                            }
+                        }
+                    }
+                }
+            }
+            scopes = expanded;
+
+            for (com.github.javaparser.ast.Node scope : scopes) {
+                // `new ProjectType()` runs that type&#x27;s ctor for real (a11 break #1): retain.
+                for (ObjectCreationExpr oce : scope.findAll(ObjectCreationExpr.class)) {
+                    String typeName = oce.getType().getNameAsString();
+                    Class&lt;?&gt; created = typeName.contains(&quot;.&quot;) ? tryLoad(typeName)
+                            : resolveSimple(cu, pkg, typeName);
+                    if (created != null &amp;&amp; isProjectType(created) &amp;&amp; !created.equals(sut)) {
+                        return true;
+                    }
+                }
+                for (MethodCallExpr call : scope.findAll(MethodCallExpr.class)) {
+                    if (call.getScope().isPresent()) {
+                        com.github.javaparser.ast.expr.Expression s = call.getScope().get();
+                        String q = null;
+                        if (s instanceof NameExpr ne &amp;&amp; !ne.getNameAsString().isEmpty()
+                                &amp;&amp; Character.isUpperCase(ne.getNameAsString().charAt(0))) {
+                            q = ne.getNameAsString();
+                        } else if (s instanceof com.github.javaparser.ast.expr.FieldAccessExpr fae) {
+                            q = fae.toString();
+                        }
+                        if (q != null) {
+                            Class&lt;?&gt; c = q.contains(&quot;.&quot;) ? tryLoad(q) : resolveSimple(cu, pkg, q);
+                            if (c != null &amp;&amp; isProjectType(c) &amp;&amp; !c.equals(sut)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        } catch (Throwable t) {
+            return false;   // unparseable source &#8658; no evidence of statics; differential is the backstop
+        }
+    }
+
+    /** Why Instancio stays for this SUT — emitted into the generated setUp so the reason ships. */
+    private static String instancioRetainedReason(Class&lt;?&gt; sut) {
+        if (sut.getConstructors().length == 0) {
+            return &quot;no public constructor&quot;;
+        }
+        boolean allSelfRef = true;
+        for (java.lang.reflect.Constructor&lt;?&gt; c : sut.getConstructors()) {
+            if (!ctorSelfReferencing(sut, c)) {
+                allSelfRef = false;
+                break;
+            }
+        }
+        if (allSelfRef) {
+            return &quot;every public constructor takes the SUT&#x27;s own type (self-referencing)&quot;;
+        }
+        return &quot;constructor or field initializer invokes project statics (new would fire them for real)&quot;;
+    }
+
+    /** TG-NOINSTSUT: arrange each ctor param with the EXISTING arg machinery, then {@code new} the SUT. */
+    private static void ctorArrangeInto(MethodSpec.Builder b, Class&lt;?&gt; sut,
+            java.lang.reflect.Constructor&lt;?&gt; ctor) {
+        List&lt;MockRef&gt; mocks = new ArrayList&lt;&gt;();
+        List&lt;String&gt; args = new ArrayList&lt;&gt;();
+        java.lang.reflect.Type[] gpts = ctor.getGenericParameterTypes();
+        Parameter[] ps = ctor.getParameters();
+
+        for (int i = 0; i &lt; ps.length; i++) {
+            Class&lt;?&gt; ptype = resolveParamType(sut, gpts[i], ps[i].getType());
+            String var = &quot;c&quot; + i + &quot;_&quot; + simpleParamName(ps[i]);
+            b.addCode(arrangeLine(ptype, var, mocks));
+            args.add(var);
+        }
+        b.addStatement(&quot;sut = new $T($L)&quot;, ClassName.get(sut), String.join(&quot;, &quot;, args));
+
+        for (MockRef mock : mocks) {
+            FieldMockRef fm = soleFieldOfType(sut, mock.type(), mock.varName());
+            if (fm != null) {   // exactly one matching SUT field &#8658; reuse the richer field-aware stubs
+                b.addCode(minimalStubs(mock, fieldBindings(sut, fm)));
+                b.addCode(factoryStubs(sut, mock.type(), fm.fieldName(), mock.varName()));
+            } else {
+                b.addCode(minimalStubs(mock));
+            }
+        }
+    }
+
+    /** The single SUT instance field of exactly this type, or null when zero/ambiguous. */
+    private static FieldMockRef soleFieldOfType(Class&lt;?&gt; sut, Class&lt;?&gt; type, String varName) {
+        Field match = null;
+        for (Field f : instanceFields(sut)) {
+            if (f.getType().equals(type)) {
+                if (match != null) {
+                    return null;   // ambiguous — plain stubs are the safe choice
+                }
+                match = f;
+            }
+        }
+        return (match == null) ? null
+                : new FieldMockRef(type, varName, match.getDeclaringClass(), match.getName(), false);
+    }
+
+    /**
+     * True when the ctor body or an instance-field initializer statically calls a project class —
+     * {@code new} would fire those statics for real (Instancio bypasses construction), so the
+     * Instancio arrangement is kept for safety. The SUPERCLASS chain is walked too (super-ctors
+     * and parent field initializers also run on {@code new}); all parent ctors are scanned, which
+     * over-retains rather than under-retains. Source unavailable &#8658; false (same policy as
+     * {@link #analyzeStaticsAndNew}); the differential run is the backstop.
+     */
+    private static boolean ctorFiresProjectStatics(Class&lt;?&gt; sut, java.lang.reflect.Constructor&lt;?&gt; ctor) {
+        if (classFiresProjectStatics(sut, sut, ctor.getParameterCount())) {
+            return true;
+        }
+        for (Class&lt;?&gt; parent = sut.getSuperclass();
+                parent != null &amp;&amp; parent != Object.class &amp;&amp; isProjectType(parent);
+                parent = parent.getSuperclass()) {
+            if (classFiresProjectStatics(parent, sut, -1)) {   // -1: every ctor of the parent
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Deterministic tie-break key: the ctor&#x27;s parameter-type signature string. */
+    private static String ctorSignature(java.lang.reflect.Constructor&lt;?&gt; c) {
+        StringBuilder sb = new StringBuilder();
+        for (Class&lt;?&gt; pt : c.getParameterTypes()) {
+            sb.append(pt.getName()).append(&#x27;,&#x27;);
+        }
+        return sb.toString();
+    }
+
+    /** Fixture lifecycle: install first in setup, then the standard arrange; restore in tearDown. */
+    private static MethodSpec boilerplateSetup(Class&lt;?&gt; sut, List&lt;SMCFixtureScanner.Facade&gt; facades,
+            boolean arrangeSut) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(&quot;setup&quot;)
+                .addAnnotation(BEFORE_EACH)
+                .addModifiers(Modifier.PUBLIC)
+                .addException(Exception.class);
+        for (SMCFixtureScanner.Facade facade : facades) {
+            b.addStatement(&quot;$L.install()&quot;, fixtureFieldName(facade));
+        }
+        if (arrangeSut) {
+            arrangeInto(b, sut);
+        }
+        return b.build();
+    }
+
+    /** Restore is mandatory — the swapped delegates are JVM-global state (lab play). */
+    private static MethodSpec boilerplateTearDown(List&lt;SMCFixtureScanner.Facade&gt; facades) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(&quot;tearDown&quot;)
+                .addAnnotation(AFTER_EACH)
+                .addModifiers(Modifier.PUBLIC)
+                .addException(Exception.class);
+        for (int i = facades.size() - 1; i &gt;= 0; i--) {
+            b.addStatement(&quot;$L.restore()&quot;, fixtureFieldName(facades.get(i)));
+        }
+        return b.build();
+    }
+
+    private static String fixtureFieldName(SMCFixtureScanner.Facade facade) {
+        String simple = FixtureGenerator.fixtureSimpleName(facade);
+        return Character.toLowerCase(simple.charAt(0)) + simple.substring(1);
+    }
+
+    private static void arrangeInto(MethodSpec.Builder b, Class&lt;?&gt; sut) {
+        /*
+         * TWEAK-POINT (TG-NOINSTSUT): the SUT itself is arranged via `new` when a public ctor is
+         * usable; Instancio only for the documented fallbacks (reason emitted into the test).
+         * Ctor choice: noInstSutCtor(). Safety scan: classFiresProjectStatics().
+         */
+        java.lang.reflect.Constructor&lt;?&gt; ctor = noInstSutCtor(sut);
+        if (ctor != null) {
+            ctorArrangeInto(b, sut, ctor);
+            return;
+        }
+        b.addComment(&quot;Instancio retained for SUT construction: $L&quot;, instancioRetainedReason(sut));
+
+        List&lt;FieldMockRef&gt; fieldMocks = new ArrayList&lt;&gt;();
+        for (Field field : instanceFields(sut)) {
+            Class&lt;?&gt; ft = field.getType();
+            Class&lt;?&gt; coll = collectionImpl(ft);
+            Class&lt;?&gt; sealedImpl = sealedConcrete(ft);   // sealed types are unmockable &#8594; use a permitted impl
+            boolean abstractCls = !ft.isArray() &amp;&amp; !ft.isInterface() &amp;&amp; !ft.isPrimitive()
+                    &amp;&amp; java.lang.reflect.Modifier.isAbstract(ft.getModifiers());   // primitives report isAbstract too
+            if (coll == null &amp;&amp; sealedImpl == null &amp;&amp; !ft.isInterface() &amp;&amp; !abstractCls
+                    &amp;&amp; !(ft.getTypeParameters().length &gt; 0 &amp;&amp; !ft.isArray() &amp;&amp; ft != Class.class)) {
+                continue;   // mock interface/abstract + generic-concrete fields (Instancio can&#x27;t build them); Class is unmockable
+            }
+            boolean realValue = coll != null || sealedImpl != null;   // real object, not a mock &#8594; no stubbing
+            String var = field.getName() + (realValue ? &quot;Val&quot; : &quot;Mock&quot;);
+            fieldMocks.add(new FieldMockRef(ft, var, field.getDeclaringClass(), field.getName(), realValue));
+            if (coll != null) {   // real empty collection, not a mock (mock iterator() == null &#8594; NPE when iterated)
+                b.addStatement(&quot;$T $L = new $T&lt;&gt;()&quot;, ClassName.get(ft), var, ClassName.get(coll));
+            } else if (sealedImpl != null) {   // permitted concrete impl of the sealed type
+                b.addStatement(&quot;$T $L = $T.create($T.class)&quot;, ClassName.get(ft), var, INSTANCIO, ClassName.get(sealedImpl));
+            } else {
+                b.addStatement(&quot;$T $L = $T.mock($T.class)&quot;,
+                        ClassName.get(ft), var, MOCKITO, ClassName.get(ft));
+            }
+        }
+
+        if (fieldMocks.isEmpty()) {
+            b.addStatement(&quot;sut = $T.create($T.class)&quot;, INSTANCIO, ClassName.get(sut));
+        } else {
+            CodeBlock.Builder chain = CodeBlock.builder().add(&quot;sut = $T.of($T.class)&quot;,
+                    INSTANCIO, ClassName.get(sut));
+            for (FieldMockRef mock : fieldMocks) {
+                chain.add(&quot;\n    .set($T.field($T.class, $S), $L)&quot;,
+                        SELECT, ClassName.get(mock.declaringClass), mock.fieldName, mock.varName);
+            }
+            chain.add(&quot;\n    .create();\n&quot;);
+            b.addCode(chain.build());
+        }
+
+        for (FieldMockRef mock : fieldMocks) {
+            if (mock.skipStub()) continue;   // real collection/sealed value, not a mock — nothing to stub
+            b.addCode(minimalStubs(new MockRef(mock.type(), mock.varName()), fieldBindings(sut, mock)));
+            b.addCode(factoryStubs(sut, mock.type(), mock.fieldName(), mock.varName()));   // call-site Class&lt;T&gt; binds
+        }
+    }
+
+    private static MethodSpec instanceTest(Class&lt;?&gt; sut, Method method, Set&lt;String&gt; usedNames,
+            Set&lt;Class&lt;?&gt;&gt; facadeSuppress) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(safeName(method), usedNames))
+                .addModifiers(Modifier.PUBLIC)
+                .addAnnotation(TEST)
+                .addException(Exception.class);   // stubbed collaborator methods may throw checked exceptions
+        addDeclaredExceptions(method, b);
+
+        String disable = disableReason(method);
+        if (disable != null) return disabledTest(b, disable);
+
+        SutStatics st = suppressFacades(analyzeStaticsAndNew(sut, method), facadeSuppress);
+        boolean scope = st != null &amp;&amp; (!st.staticTargets().isEmpty() || !st.constructedTypes().isEmpty());
+        if (scope) {
+            b.beginControlFlow(&quot;try ($L)&quot;, mockScopeResources(st));
+            emitStaticStubs(b, st, sut);
+        }
+
+        List&lt;MockRef&gt; mocks = new ArrayList&lt;&gt;();
+        List&lt;String&gt; methodArgNames = new ArrayList&lt;&gt;();
+        java.lang.reflect.Type[] gpts = method.getGenericParameterTypes();
+        Parameter[] ps = method.getParameters();
+        for (int i = 0; i &lt; ps.length; i++) {
+            Class&lt;?&gt; ptype = resolveParamType(sut, gpts[i], ps[i].getType());
+            String var = &quot;a&quot; + i + &quot;_&quot; + simpleParamName(ps[i]);
+            b.addCode(arrangeLine(ptype, var, mocks));
+            methodArgNames.add(var);
+        }
+
+        for (MockRef mock : mocks) {
+            b.addCode(minimalStubs(mock));
+        }
+
+        String callArgs = String.join(&quot;, &quot;, methodArgNames);
+        if (method.getReturnType() == void.class) {
+            b.addStatement(&quot;sut.$L($L)&quot;, method.getName(), callArgs);
+            b.addStatement(&quot;$T.assertNotNull(sut)&quot;, ASSERTIONS);
+        } else if (method.getReturnType().isPrimitive()) {
+            b.addStatement(&quot;sut.$L($L)&quot;, method.getName(), callArgs);
+            b.addStatement(&quot;$T.assertTrue(true)&quot;, ASSERTIONS);
+        } else {
+            b.addStatement(&quot;$T result = sut.$L($L)&quot;,
+                    TypeName.get(method.getReturnType()), method.getName(), callArgs);
+            b.addComment(&quot;TODO: assert on result (a null return may be valid — arrange skeleton)&quot;);
+        }
+        if (scope) {
+            b.endControlFlow();
+        }
+        return b.build();
+    }
+
+    private static MethodSpec staticTest(Class&lt;?&gt; sut, Method method, boolean prefix, Set&lt;String&gt; usedNames,
+            Set&lt;Class&lt;?&gt;&gt; facadeSuppress) {
+        String base = prefix ? &quot;static_&quot; + safeName(method) : safeName(method);
+        MethodSpec.Builder b = MethodSpec.methodBuilder(uniqueName(base, usedNames))
+                .addModifiers(Modifier.PUBLIC)
+                .addAnnotation(TEST)
+                .addException(Exception.class);   // stubbed collaborator methods may throw checked exceptions
+        addDeclaredExceptions(method, b);
+
+        String disable = disableReason(method);
+        if (disable != null) return disabledTest(b, disable);
+
+        SutStatics st = suppressFacades(analyzeStaticsAndNew(sut, method), facadeSuppress);
+        boolean scope = st != null &amp;&amp; (!st.staticTargets().isEmpty() || !st.constructedTypes().isEmpty());
+        if (scope) {
+            b.beginControlFlow(&quot;try ($L)&quot;, mockScopeResources(st));
+            emitStaticStubs(b, st, sut);
+        }
+
+        List&lt;MockRef&gt; mocks = new ArrayList&lt;&gt;();
+        List&lt;String&gt; methodArgNames = new ArrayList&lt;&gt;();
+        java.lang.reflect.Type[] gpts = method.getGenericParameterTypes();
+        Parameter[] ps = method.getParameters();
+        for (int i = 0; i &lt; ps.length; i++) {
+            Class&lt;?&gt; ptype = resolveParamType(sut, gpts[i], ps[i].getType());
+            String var = &quot;a&quot; + i + &quot;_&quot; + simpleParamName(ps[i]);
+            b.addCode(arrangeLine(ptype, var, mocks));
+            methodArgNames.add(var);
+        }
+        for (MockRef mock : mocks) {
+            b.addCode(minimalStubs(mock));
+        }
+
+        String callArgs = String.join(&quot;, &quot;, methodArgNames);
+        ClassName sutCn = ClassName.get(sut);
+        if (method.getReturnType() == void.class) {
+            b.addStatement(&quot;$T.$L($L)&quot;, sutCn, method.getName(), callArgs);
+            b.addStatement(&quot;$T.assertTrue(true)&quot;, ASSERTIONS);
+        } else if (method.getReturnType().isPrimitive()) {
+            b.addStatement(&quot;$T.$L($L)&quot;, sutCn, method.getName(), callArgs);
+            b.addStatement(&quot;$T.assertTrue(true)&quot;, ASSERTIONS);
+        } else {
+            b.addStatement(&quot;$T result = $T.$L($L)&quot;,
+                    TypeName.get(method.getReturnType()), sutCn, method.getName(), callArgs);
+            b.addComment(&quot;TODO: assert on result (a null return may be valid — arrange skeleton)&quot;);
+        }
+        if (scope) {
+            b.endControlFlow();
+        }
+        return b.build();
+    }
+
+    private static List&lt;Field&gt; instanceFields(Class&lt;?&gt; sut) {
+        List&lt;Field&gt; fields = new ArrayList&lt;&gt;();
+        Class&lt;?&gt; cur = sut;
+        while (cur != null &amp;&amp; cur != Object.class) {
+            // Skip JDK frames (e.g. Throwable.suppressedExceptions) — not SUT collaborators.
+            if (isJdkType(cur)) {
+                cur = cur.getSuperclass();
+                continue;
+            }
+            for (Field field : cur.getDeclaredFields()) {
+                if (!java.lang.reflect.Modifier.isStatic(field.getModifiers())) {
+                    fields.add(field);
+                }
+            }
+            cur = cur.getSuperclass();
+        }
+        return fields;
+    }
+
+    private static boolean isJdkType(Class&lt;?&gt; type) {
+        Package p = type.getPackage();
+        if (p == null) {
+            return false;
+        }
+        String n = p.getName();
+        return n.equals(&quot;java&quot;) || n.startsWith(&quot;java.&quot;)
+                || n.equals(&quot;javax&quot;) || n.startsWith(&quot;javax.&quot;)
+                || n.equals(&quot;jdk&quot;) || n.startsWith(&quot;jdk.&quot;);
+    }
+
+    /** True if the class&#x27;s top-level source exists under the main source root (project type, not JDK/third-party). */
+    private static boolean isProjectType(Class&lt;?&gt; type) {
+        if (type == null) {
+            return false;
+        }
+        Class&lt;?&gt; top = type;
+        while (top.getEnclosingClass() != null) {
+            top = top.getEnclosingClass();
+        }
+        return Files.exists(Config.mainSourceRoot().resolve(top.getName().replace(&#x27;.&#x27;, &#x27;/&#x27;) + &quot;.java&quot;));
+    }
+
+    /** Resolve a parameter&#x27;s generic type against the SUT&#x27;s superclass parameterization, so a type
+     *  variable from a generic parent (e.g. T extends ClaimsHolder) becomes the concrete type the
+     *  call site requires (e.g. HeaderClaimsHolder) rather than the erased bound. Falls back to erased. */
+    /** Honest skip: a compiling @Disabled test with the reason, for methods the skeleton can&#x27;t arrange. */
+    private static MethodSpec disabledTest(MethodSpec.Builder b, String reason) {
+        b.addAnnotation(AnnotationSpec.builder(DISABLED).addMember(&quot;value&quot;, &quot;$S&quot;, reason).build());
+        b.addStatement(&quot;$T.assertTrue(true)&quot;, ASSERTIONS);
+        return b.build();
+    }
+
+    private static Class&lt;?&gt; resolveParamType(Class&lt;?&gt; sut, java.lang.reflect.Type generic, Class&lt;?&gt; erased) {
+        try {
+            Class&lt;?&gt; multi = multiBoundConcrete(generic);
+            if (multi != null) return multi;   // &lt;T extends Number &amp; Comparable&lt;T&gt;&gt; -&gt; Integer (satisfies all)
+            Class&lt;?&gt; r = toClass(resolveType(generic, typeBindings(sut)));
+            return (r != null &amp;&amp; r != Object.class) ? r : erased;
+        } catch (Throwable t) {
+            return erased;
+        }
+    }
+
+    /** For a type variable with an INTERSECTION bound whose first bound alone can&#x27;t be denoted as an
+     *  argument (Number isn&#x27;t Comparable), find a concrete type assignable to ALL bounds so the call
+     *  type-checks. Returns null when the first bound already satisfies the rest (normal path) or when
+     *  no common concrete exists (caller then @Disables the method). */
+    private static Class&lt;?&gt; multiBoundConcrete(java.lang.reflect.Type generic) {
+        if (!(generic instanceof java.lang.reflect.TypeVariable&lt;?&gt; tv)) return null;
+        java.lang.reflect.Type[] bounds = tv.getBounds();
+        if (bounds.length &lt;= 1) return null;
+        Class&lt;?&gt; first = toClass(bounds[0]);
+        boolean firstSatisfies = true;
+        for (int i = 1; i &lt; bounds.length; i++) {
+            if (!toClass(bounds[i]).isAssignableFrom(first)) { firstSatisfies = false; break; }
+        }
+        if (firstSatisfies) return null;   // first bound denotable on its own — normal path handles it
+        for (Class&lt;?&gt; c : new Class&lt;?&gt;[]{Integer.class, Long.class, Double.class, String.class, Boolean.class}) {
+            boolean ok = true;
+            for (java.lang.reflect.Type b : bounds) if (!toClass(b).isAssignableFrom(c)) { ok = false; break; }
+            if (ok) return c;
+        }
+        return null;   // no common concrete -&gt; method gets @Disabled
+    }
+
+    /** Non-null reason when a method can&#x27;t be safely arranged: an intersection-bound type-var param
+     *  with no denotable/concrete satisfying type. The test is emitted @Disabled (honest skip) rather
+     *  than as code that won&#x27;t compile. */
+    private static String disableReason(Method m) {
+        for (java.lang.reflect.Type gt : m.getGenericParameterTypes()) {
+            if (gt instanceof java.lang.reflect.TypeVariable&lt;?&gt; tv &amp;&amp; tv.getBounds().length &gt; 1) {
+                Class&lt;?&gt; first = toClass(tv.getBounds()[0]);
+                boolean firstSatisfies = true;
+                for (int i = 1; i &lt; tv.getBounds().length; i++) {
+                    if (!toClass(tv.getBounds()[i]).isAssignableFrom(first)) { firstSatisfies = false; break; }
+                }
+                if (!firstSatisfies &amp;&amp; multiBoundConcrete(gt) == null) {
+                    return &quot;testgen: cannot arrange intersection-bounded type parameter &lt;&quot; + tv.getName() + &quot;&gt;&quot;;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; typeBindings(Class&lt;?&gt; sut) {
+        java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; map = new java.util.HashMap&lt;&gt;();
+        collectBindings(sut, map);
+        return map;
+    }
+
+    /** Collect type-var bindings from the SUT&#x27;s generic superclasses AND generic interfaces
+     *  (e.g. Comparable&amp;lt;Priority&amp;gt; -&amp;gt; T=Priority), recursively. */
+    private static void collectBindings(Class&lt;?&gt; c,
+            java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; map) {
+        if (c == null || c == Object.class) {
+            return;
+        }
+        bindArgs(c.getGenericSuperclass(), map);
+        collectBindings(c.getSuperclass(), map);
+        for (java.lang.reflect.Type it : c.getGenericInterfaces()) {
+            bindArgs(it, map);
+            if (it instanceof java.lang.reflect.ParameterizedType ipt) {
+                collectBindings((Class&lt;?&gt;) ipt.getRawType(), map);
+            } else if (it instanceof Class&lt;?&gt; ic) {
+                collectBindings(ic, map);
+            }
+        }
+    }
+
+    /** Bindings for a collaborator field: SUT-level bindings plus the field&#x27;s own type args
+     *  (store:Store&amp;lt;String&amp;gt; -&gt; Store&#x27;s T -&gt; String), so its methods&#x27; T returns resolve concretely. */
+    private static java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; fieldBindings(
+            Class&lt;?&gt; sut, FieldMockRef mock) {
+        java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; map = typeBindings(sut);
+        try {
+            bindArgs(mock.declaringClass().getDeclaredField(mock.fieldName()).getGenericType(), map);
+        } catch (NoSuchFieldException ignored) {
+            // field not reflectively found (shouldn&#x27;t happen) — fall back to SUT-level bindings only
+        }
+        return map;
+    }
+
+    private static void bindArgs(java.lang.reflect.Type t,
+            java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; map) {
+        if (t instanceof java.lang.reflect.ParameterizedType pt) {
+            Class&lt;?&gt; raw = (Class&lt;?&gt;) pt.getRawType();
+            java.lang.reflect.TypeVariable&lt;?&gt;[] vars = raw.getTypeParameters();
+            java.lang.reflect.Type[] args = pt.getActualTypeArguments();
+            for (int i = 0; i &lt; vars.length &amp;&amp; i &lt; args.length; i++) {
+                map.put(vars[i], resolveType(args[i], map));
+            }
+        }
+    }
+
+    private static java.lang.reflect.Type resolveType(java.lang.reflect.Type t,
+            java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; map) {
+        if (t instanceof java.lang.reflect.TypeVariable&lt;?&gt; tv) {
+            java.lang.reflect.Type bound = map.get(tv);
+            if (bound != null &amp;&amp; bound != tv) {
+                return resolveType(bound, map);
+            }
+            java.lang.reflect.Type[] bounds = tv.getBounds();
+            return bounds.length &gt; 0 ? bounds[0] : Object.class;
+        }
+        return t;
+    }
+
+    /** A concrete Class for a collaborator method&#x27;s generic return, resolving type variables (and T[])
+     *  via the collaborator&#x27;s bindings; null if it can&#x27;t be resolved to a concrete non-Object type. */
+    private static Class&lt;?&gt; resolveReturnClass(java.lang.reflect.Type gret,
+            java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; bindings) {
+        if (bindings.isEmpty()) return null;
+        if (gret instanceof java.lang.reflect.TypeVariable&lt;?&gt;) {
+            Class&lt;?&gt; c = toClass(resolveType(gret, bindings));
+            return (c != null &amp;&amp; c != Object.class) ? c : null;
+        }
+        if (gret instanceof java.lang.reflect.GenericArrayType gat
+                &amp;&amp; gat.getGenericComponentType() instanceof java.lang.reflect.TypeVariable&lt;?&gt; comp) {
+            Class&lt;?&gt; cc = toClass(resolveType(comp, bindings));
+            if (cc != null &amp;&amp; cc != Object.class) {
+                return java.lang.reflect.Array.newInstance(cc, 0).getClass();   // e.g. String[].class
+            }
+        }
+        return null;
+    }
+
+    /** True if the generic return is a type variable (or an array of one) — i.e. erased to Object/Object[]. */
+    private static boolean isTypeVarReturn(java.lang.reflect.Type gret) {
+        if (gret instanceof java.lang.reflect.TypeVariable&lt;?&gt;) return true;
+        if (gret instanceof java.lang.reflect.GenericArrayType gat) return isTypeVarReturn(gat.getGenericComponentType());
+        return false;
+    }
+
+    private static Class&lt;?&gt; toClass(java.lang.reflect.Type t) {
+        if (t instanceof Class&lt;?&gt; c) {
+            return c;
+        }
+        if (t instanceof java.lang.reflect.ParameterizedType pt) {
+            return (Class&lt;?&gt;) pt.getRawType();
+        }
+        if (t instanceof java.lang.reflect.GenericArrayType) {
+            return Object[].class;
+        }
+        if (t instanceof java.lang.reflect.TypeVariable&lt;?&gt; tv) {
+            java.lang.reflect.Type[] b = tv.getBounds();
+            return b.length &gt; 0 ? toClass(b[0]) : Object.class;
+        }
+        return Object.class;
+    }
+
+    private static boolean isStaticOnlyClass(Class&lt;?&gt; sut) {
+        return filterInstance(sut.getDeclaredMethods()).isEmpty()
+                &amp;&amp; !filterStatic(sut.getDeclaredMethods()).isEmpty();
+    }
+
+    /** Prefer TypeName.get so arrays (and generics) render correctly. */
+    private static TypeName javaPoetType(Class&lt;?&gt; type) {
+        return TypeName.get(type);
+    }
+
+    /** Concrete impl for a JDK collection/map interface, else null. A mock collection returns
+     *  null from iterator()/entrySet() &#8594; SUTs that iterate the arg NPE; a real empty one runs. */
+    private static Class&lt;?&gt; collectionImpl(Class&lt;?&gt; t) {
+        if (!t.isInterface()) return null;
+        if (t == java.util.NavigableMap.class || t == java.util.SortedMap.class) return java.util.TreeMap.class;
+        if (t == java.util.Map.class) return java.util.HashMap.class;
+        if (t == java.util.NavigableSet.class || t == java.util.SortedSet.class) return java.util.TreeSet.class;
+        if (t == java.util.Set.class) return java.util.HashSet.class;
+        if (t == java.util.Queue.class || t == java.util.Deque.class) return java.util.ArrayDeque.class;
+        if (t == java.util.List.class || t == java.util.Collection.class || t == Iterable.class)
+            return java.util.ArrayList.class;
+        return null;
+    }
+
+    /** A permitted, instantiable concrete subtype of a sealed type (recursing through sealed subtiers),
+     *  else null. Sealed types are unmockable (Mockito refuses) — build a permitted impl instead. */
+    private static Class&lt;?&gt; sealedConcrete(Class&lt;?&gt; t) {
+        if (t == null || !t.isSealed()) return null;
+        for (Class&lt;?&gt; sub : t.getPermittedSubclasses()) {
+            if (sub.isSealed()) {
+                Class&lt;?&gt; deeper = sealedConcrete(sub);
+                if (deeper != null) return deeper;
+            } else if (!sub.isInterface() &amp;&amp; !java.lang.reflect.Modifier.isAbstract(sub.getModifiers())) {
+                return sub;   // concrete record/class permitted by the seal
+            }
+        }
+        return null;
+    }
+
+    private static CodeBlock arrangeLine(Class&lt;?&gt; type, String varName, List&lt;MockRef&gt; mocks) {
+        Class&lt;?&gt; sealedImpl = sealedConcrete(type);
+        if (sealedImpl != null) {   // sealed param -&gt; a permitted concrete impl (sealed types are unmockable)
+            return arrangeConcrete(sealedImpl, varName, mocks);
+        }
+        Class&lt;?&gt; coll = collectionImpl(type);
+        if (coll != null) {   // real empty collection, not a mock (mock iterator() == null &#8594; NPE)
+            return CodeBlock.of(&quot;$T $L = new $T&lt;&gt;();\n&quot;, ClassName.get(type), varName, ClassName.get(coll));
+        }
+        if (type.isInterface() || (!type.isArray() &amp;&amp; !type.isPrimitive() &amp;&amp; type != Class.class
+                &amp;&amp; (java.lang.reflect.Modifier.isAbstract(type.getModifiers())
+                        || type.getTypeParameters().length &gt; 0))) {   // generic concrete: Instancio can&#x27;t build raw
+            mocks.add(new MockRef(type, varName));
+            return CodeBlock.of(&quot;$T $L = $T.mock($T.class);\n&quot;,
+                    ClassName.get(type), varName, MOCKITO, ClassName.get(type));
+        }
+        if (type == Class.class) {
+            return CodeBlock.of(&quot;$T&lt;?&gt; $L = $T.class;\n&quot;,
+                    ClassName.get(Class.class), varName, ClassName.get(String.class));
+        }
+        if (type == java.math.BigDecimal.class) {
+            return CodeBlock.of(&quot;$T $L = $T.ZERO;\n&quot;,
+                    ClassName.get(java.math.BigDecimal.class), varName,
+                    ClassName.get(java.math.BigDecimal.class));
+        }
+        if (type.isPrimitive()) {
+            Class&lt;?&gt; boxed = box(type);
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;,
+                    ClassName.get(boxed), varName, INSTANCIO, ClassName.get(boxed));
+        }
+        return arrangeConcrete(type, varName, mocks);
+    }
+
+    private static CodeBlock arrangeConcrete(Class&lt;?&gt; type, String varName, List&lt;MockRef&gt; mocks) {
+        List&lt;Field&gt; ifaceFields = interfaceInstanceFields(type);
+        if (ifaceFields.isEmpty()) {
+            TypeName tn = javaPoetType(type);
+            return CodeBlock.of(&quot;$T $L = $T.create($T.class);\n&quot;, tn, varName, INSTANCIO, tn);
+        }
+        CodeBlock.Builder block = CodeBlock.builder();
+        for (Field field : ifaceFields) {
+            String mockVar = varName + &quot;_&quot; + field.getName() + &quot;Mock&quot;;
+            mocks.add(new MockRef(field.getType(), mockVar));
+            block.addStatement(&quot;$T $L = $T.mock($T.class)&quot;,
+                    ClassName.get(field.getType()), mockVar, MOCKITO, ClassName.get(field.getType()));
+        }
+        CodeBlock.Builder chain = CodeBlock.builder().add(&quot;$T $L = $T.of($T.class)&quot;,
+                ClassName.get(type), varName, INSTANCIO, ClassName.get(type));
+        for (Field field : ifaceFields) {
+            String mockVar = varName + &quot;_&quot; + field.getName() + &quot;Mock&quot;;
+            chain.add(&quot;\n    .set($T.field($T.class, $S), $L)&quot;,
+                    SELECT, ClassName.get(field.getDeclaringClass()), field.getName(), mockVar);
+        }
+        chain.add(&quot;\n    .create();\n&quot;);
+        block.add(chain.build());
+        return block.build();
+    }
+
+    private static List&lt;Field&gt; interfaceInstanceFields(Class&lt;?&gt; type) {
+        List&lt;Field&gt; out = new ArrayList&lt;&gt;();
+        for (Field field : instanceFields(type)) {
+            Class&lt;?&gt; ft = field.getType();
+            boolean abstractCls = !ft.isArray() &amp;&amp; !ft.isInterface() &amp;&amp; !ft.isPrimitive()
+                    &amp;&amp; java.lang.reflect.Modifier.isAbstract(ft.getModifiers());   // primitives report isAbstract too
+            if (ft.isInterface() || abstractCls
+                    || (ft.getTypeParameters().length &gt; 0 &amp;&amp; !ft.isArray() &amp;&amp; ft != Class.class)) {
+                out.add(field);
+            }
+        }
+        return out;
+    }
+
+    private static void addDeclaredExceptions(Method method, MethodSpec.Builder testMethod) {
+        for (Class&lt;?&gt; ex : method.getExceptionTypes()) {
+            testMethod.addException(TypeName.get(ex));
+        }
+    }
+
+    private static CodeBlock minimalStubs(MockRef mock) {
+        return minimalStubs(mock, java.util.Map.of());
+    }
+
+    /** Call-site-aware stubs for a collaborator&#x27;s {@code &lt;T&gt; T m(Class&lt;T&gt;)} factory methods. The SUT
+     *  passes a concrete {@code X.class} that the generic any()-matcher stub can&#x27;t bind to T (so #37
+     *  returns null -&gt; NPE if the SUT derefs). Here we read the SUT source, find {@code field.m(X.class)}
+     *  calls, and emit {@code when(mock.m(X.class)).thenReturn(&lt;value of X&gt;)} so T resolves per call. */
+    private static CodeBlock factoryStubs(Class&lt;?&gt; sut, Class&lt;?&gt; collab, String fieldName, String mockVar) {
+        CodeBlock.Builder out = CodeBlock.builder();
+        try {
+            Path src = Config.mainSourceRoot().resolve(sut.getName().replace(&#x27;.&#x27;, &#x27;/&#x27;) + &quot;.java&quot;);
+            if (!Files.isRegularFile(src)) return out.build();
+            CompilationUnit cu = StaticJavaParser.parse(src);
+            String pkg = sut.getPackageName();
+            java.util.Set&lt;String&gt; seen = new java.util.HashSet&lt;&gt;();
+            for (MethodCallExpr call : cu.findAll(MethodCallExpr.class)) {
+                if (call.getScope().isEmpty()) continue;
+                com.github.javaparser.ast.expr.Expression scope = call.getScope().get();
+                String scopeName = scope instanceof NameExpr ne ? ne.getNameAsString()
+                        : scope instanceof com.github.javaparser.ast.expr.FieldAccessExpr fae ? fae.getNameAsString()
+                        : null;
+                if (!fieldName.equals(scopeName)) continue;
+                int[] pos = {-1};
+                Class&lt;?&gt; x = classArg(call, cu, pkg, pos);   // the single X.class arg + its position
+                if (x == null) continue;
+                Method fm = factoryMethod(collab, call.getNameAsString(), call.getArguments().size(), pos[0]);
+                if (fm == null || !seen.add(call.getNameAsString() + &quot;|&quot; + pos[0] + &quot;|&quot; + x.getName())) continue;
+                out.addStatement(&quot;$T.when($L.$L($L)).thenReturn($L)&quot;,
+                        MOCKITO, mockVar, call.getNameAsString(), factoryMatchers(fm, pos[0], x), stubValue(x));
+            }
+        } catch (Throwable ignored) {
+            // best-effort: on any parse/resolve failure fall back to the generic stub already emitted
+        }
+        return out.build();
+    }
+
+    /** If the call has exactly one {@code X.class} argument, resolve X and record its position; else null. */
+    private static Class&lt;?&gt; classArg(MethodCallExpr call, CompilationUnit cu, String pkg, int[] posOut) {
+        Class&lt;?&gt; x = null;
+        for (int i = 0; i &lt; call.getArguments().size(); i++) {
+            if (call.getArgument(i) instanceof com.github.javaparser.ast.expr.ClassExpr ce) {
+                if (posOut[0] &gt;= 0) return null;   // more than one Class arg — ambiguous, skip
+                posOut[0] = i;
+                x = resolveSimple(cu, pkg, ce.getType().asString());
+            }
+        }
+        return x;
+    }
+
+    /** Matchers for a factory call: eq(X.class) at the Class position, typed any() elsewhere. */
+    private static CodeBlock factoryMatchers(Method fm, int classPos, Class&lt;?&gt; x) {
+        Class&lt;?&gt;[] ps = fm.getParameterTypes();
+        CodeBlock.Builder mb = CodeBlock.builder();
+        for (int i = 0; i &lt; ps.length; i++) {
+            if (i &gt; 0) mb.add(&quot;, &quot;);
+            if (i == classPos) mb.add(&quot;$T.eq($T.class)&quot;, MATCHERS, ClassName.get(x));
+            else mb.add(typedAnyMatcher(ps[i]));
+        }
+        return mb.build();
+    }
+
+    /** A {@code &lt;T&gt; T m(..., Class&lt;T&gt;, ...)} factory method: matching name/arity, type-variable return,
+     *  and a {@code Class} parameter at the position the SUT passed {@code X.class}. */
+    private static Method factoryMethod(Class&lt;?&gt; collab, String name, int argc, int classPos) {
+        for (Method m : collab.getMethods()) {
+            if (m.getName().equals(name) &amp;&amp; m.getParameterCount() == argc
+                    &amp;&amp; classPos &gt;= 0 &amp;&amp; classPos &lt; m.getParameterCount()
+                    &amp;&amp; m.getParameterTypes()[classPos] == Class.class
+                    &amp;&amp; m.getGenericReturnType() instanceof java.lang.reflect.TypeVariable) {
+                return m;
+            }
+        }
+        return null;
+    }
+
+    /** bindings: type-variable -&gt; concrete type, derived from the collaborator reference&#x27;s parameterized
+     *  type (e.g. field store:Store&amp;lt;String&amp;gt;). Lets a T-returning collaborator method stub the bound
+     *  concrete (String) instead of erased Object -&gt; avoids ClassCastException at the SUT call site. */
+    private static CodeBlock minimalStubs(MockRef mock,
+            java.util.Map&lt;java.lang.reflect.TypeVariable&lt;?&gt;, java.lang.reflect.Type&gt; bindings) {
+        CodeBlock.Builder stubs = CodeBlock.builder();
+        for (Method m : mock.type.getMethods()) {
+            if (!include(m) || java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                continue;
+            }
+            if (!Config.STUB_THIRD_PARTY &amp;&amp; !isProjectType(m.getDeclaringClass())) {
+                continue;   // internal-only: mock third-party collaborators but don&#x27;t stub their methods
+            }
+            CodeBlock anyArgs = anyMatchers(m.getParameterTypes());
+            java.lang.reflect.Type gret = m.getGenericReturnType();
+            Class&lt;?&gt; ret = m.getReturnType();
+            Class&lt;?&gt; resolved = resolveReturnClass(gret, bindings);   // bind type-var / T[] via collaborator generics
+            if (resolved != null) ret = resolved;
+            boolean unresolvedTypeVar = isTypeVarReturn(gret) &amp;&amp; (resolved == null);
+            if (ret == void.class) {
+                stubs.addStatement(&quot;$T.doNothing().when($L).$L($L)&quot;,
+                        MOCKITO, mock.varName, m.getName(), anyArgs);
+            } else if (ret.isPrimitive()) {
+                stubs.addStatement(&quot;$T.doReturn($L).when($L).$L($L)&quot;,
+                        MOCKITO, primitiveDefaultExpr(ret), mock.varName, m.getName(), anyArgs);
+            } else if (unresolvedTypeVar) {   // T bound by the call arg (unknowable here): a bare Object cast
+                stubs.addStatement(&quot;$T.doReturn(null).when($L).$L($L)&quot;,   // to the SUT&#x27;s expected type would CCE; null casts to anything
+                        MOCKITO, mock.varName, m.getName(), anyArgs);
+            } else if (ret != Object.class &amp;&amp; ret.isAssignableFrom(mock.type)) {   // fluent/self-returning: same mock
+                stubs.addStatement(&quot;$T.doReturn($L).when($L).$L($L)&quot;,   // so chained builder calls resolve (RETURNS_SELF)
+                        MOCKITO, mock.varName, mock.varName, m.getName(), anyArgs);
+            } else {
+                // doReturn(...).when(...) takes Object -&gt; sidesteps the thenReturn compile-time
+                // return-type check that fails on erased generic/covariant returns.
+                CodeBlock rv = classReturnStub(gret);   // Class&lt;...&gt; -&gt; X.class (Instancio can&#x27;t build Class)
+                if (rv == null) rv = optionalReturnStub(gret);   // real present Optional, not a mock
+                if (rv == null) rv = entryReturnStub(gret);   // real Map.entry, not a mock
+                if (rv == null) rv = futureReturnStub(gret);   // real completed future, not a mock
+                if (rv == null) rv = stubValue(ret);
+                stubs.addStatement(&quot;$T.doReturn($L).when($L).$L($L)&quot;,
+                        MOCKITO, rv, mock.varName, m.getName(), anyArgs);
+            }
+        }
+        return stubs.build();
+    }
+
+    /** A real completed future for a method returning CompletableFuture/Future/CompletionStage (a mocked
+     *  one returns null from join()/get() -&gt; NPE); uses the element type, else completes with null. */
+    private static CodeBlock futureReturnStub(java.lang.reflect.Type gret) {
+        Class&lt;?&gt; raw = toClass(gret);
+        if (raw != java.util.concurrent.CompletableFuture.class &amp;&amp; raw != java.util.concurrent.Future.class
+                &amp;&amp; raw != java.util.concurrent.CompletionStage.class) {
+            return null;
+        }
+        ClassName cf = ClassName.get(java.util.concurrent.CompletableFuture.class);
+        if (gret instanceof java.lang.reflect.ParameterizedType pt) {
+            Class&lt;?&gt; elem = toClass(pt.getActualTypeArguments()[0]);
+            if (elem != null &amp;&amp; elem != Object.class) {
+                return CodeBlock.of(&quot;$T.completedFuture($L)&quot;, cf, stubValue(elem));
+            }
+        }
+        return CodeBlock.of(&quot;$T.completedFuture(null)&quot;, cf);
+    }
+
+    /** A real {@code Map.entry(k, v)} for a method returning {@code Map.Entry&lt;K,V&gt;} (a mocked entry
+     *  returns null from getKey()/getValue() -&gt; NPE if derefed); null when not a Map.Entry return. */
+    private static CodeBlock entryReturnStub(java.lang.reflect.Type gret) {
+        if (toClass(gret) != java.util.Map.Entry.class) return null;
+        ClassName map = ClassName.get(java.util.Map.class);
+        if (gret instanceof java.lang.reflect.ParameterizedType pt
+                &amp;&amp; pt.getActualTypeArguments().length == 2) {
+            Class&lt;?&gt; k = toClass(pt.getActualTypeArguments()[0]);
+            Class&lt;?&gt; v = toClass(pt.getActualTypeArguments()[1]);
+            if (k != null &amp;&amp; v != null &amp;&amp; k != Object.class &amp;&amp; v != Object.class) {
+                return CodeBlock.of(&quot;$T.entry($L, $L)&quot;, map, stubValue(k), stubValue(v));
+            }
+        }
+        return CodeBlock.of(&quot;$T.entry(new Object(), new Object())&quot;, map);   // raw: Map.entry rejects null
+    }
+
+    /** A concrete {@code X.class} literal for a method returning {@code Class&lt;...&gt;} (Instancio can&#x27;t
+     *  build java.lang.Class), using the wildcard/type upper bound; Object.class when raw/unbounded. */
+    private static CodeBlock classReturnStub(java.lang.reflect.Type gret) {
+        if (toClass(gret) != Class.class) return null;
+        Class&lt;?&gt; bound = Object.class;
+        if (gret instanceof java.lang.reflect.ParameterizedType pt) {
+            java.lang.reflect.Type arg = pt.getActualTypeArguments()[0];
+            if (arg instanceof java.lang.reflect.WildcardType wt &amp;&amp; wt.getUpperBounds().length &gt; 0) {
+                bound = toClass(wt.getUpperBounds()[0]);
+            } else {
+                bound = toClass(arg);
+            }
+        }
+        if (bound == null) bound = Object.class;
+        return CodeBlock.of(&quot;$T.class&quot;, ClassName.get(bound));
+    }
+
+    /** A real Optional stub value (present, with the element type) for a method returning Optional/
+     *  OptionalInt/Long/Double, else null. A mocked Optional returns null from get()/map() -&gt; caller
+     *  NPEs; Optional.empty() throws on get(). A present Optional exercises get()/map()/orElse alike. */
+    private static CodeBlock optionalReturnStub(java.lang.reflect.Type gret) {
+        Class&lt;?&gt; raw = toClass(gret);
+        if (raw == java.util.OptionalInt.class) return CodeBlock.of(&quot;$T.of(0)&quot;, raw);
+        if (raw == java.util.OptionalLong.class) return CodeBlock.of(&quot;$T.of(0L)&quot;, raw);
+        if (raw == java.util.OptionalDouble.class) return CodeBlock.of(&quot;$T.of(0.0)&quot;, raw);
+        if (raw != java.util.Optional.class) return null;
+        if (gret instanceof java.lang.reflect.ParameterizedType pt) {
+            Class&lt;?&gt; elem = toClass(pt.getActualTypeArguments()[0]);
+            if (elem != null &amp;&amp; elem != Object.class) {
+                return CodeBlock.of(&quot;$T.of($L)&quot;, java.util.Optional.class, stubValue(elem));
+            }
+        }
+        return CodeBlock.of(&quot;$T.empty()&quot;, java.util.Optional.class);   // element unknown -&gt; empty (still real)
+    }
+
+    /** Safe stub value for a non-void, non-primitive return: mock interfaces/abstract types
+     *  (Instancio cannot instantiate them, so they would throw at runtime), Instancio.create concretes. */
+    private static CodeBlock stubValue(Class&lt;?&gt; ret) {
+        Class&lt;?&gt; sealedImpl = sealedConcrete(ret);
+        if (sealedImpl != null) {   // sealed return -&gt; permitted concrete impl (Mockito can&#x27;t mock sealed)
+            return CodeBlock.of(&quot;$T.create($T.class)&quot;, INSTANCIO, ClassName.get(sealedImpl));
+        }
+        if (ret.isArray()) {
+            Class&lt;?&gt; comp = ret.getComponentType();
+            if (comp.isInterface() || (!comp.isPrimitive() &amp;&amp; !comp.isArray()
+                    &amp;&amp; java.lang.reflect.Modifier.isAbstract(comp.getModifiers()))) {
+                return CodeBlock.of(&quot;new $T[0]&quot;, ClassName.get(comp));   // Instancio fills iface/abstract elems with null &#8594; NPE
+            }
+        }
+        TypeName tn = javaPoetType(ret);
+        Class&lt;?&gt; coll = collectionImpl(ret);
+        if (coll != null) {   // empty real collection: a mocked List returns isEmpty()==false &amp; get(i)==null &#8594; NPE
+            return CodeBlock.of(&quot;new $T&lt;&gt;()&quot;, ClassName.get(coll));
+        }
+        // mock interfaces/abstracts AND generic types (Instancio can&#x27;t build Foo&lt;T&gt;/Optional&lt;T&gt; raw).
+        // arrays report isAbstract()==true but are not mockable — Instancio.create them.
+        boolean mockable = !ret.isArray() &amp;&amp; ret != Class.class   // Class is generic but Mockito refuses to mock it
+                &amp;&amp; (ret.isInterface() || java.lang.reflect.Modifier.isAbstract(ret.getModifiers())
+                        || ret.getTypeParameters().length &gt; 0);
+        if (mockable) {
+            return CodeBlock.of(&quot;$T.mock($T.class)&quot;, MOCKITO, tn);
+        }
+        return CodeBlock.of(&quot;$T.create($T.class)&quot;, INSTANCIO, tn);
+    }
+
+    private static CodeBlock anyMatchers(Class&lt;?&gt;[] params) {
+        if (params.length == 0) {
+            return CodeBlock.of(&quot;&quot;);
+        }
+        CodeBlock.Builder sb = CodeBlock.builder();
+        for (int i = 0; i &lt; params.length; i++) {
+            if (i &gt; 0) {
+                sb.add(&quot;, &quot;);
+            }
+            sb.add(typedAnyMatcher(params[i]));
+        }
+        return sb.build();
+    }
+
+    /** Type-aware matcher: primitives use anyX(); references use any(Type.class) so overloads disambiguate. */
+    private static CodeBlock typedAnyMatcher(Class&lt;?&gt; p) {
+        if (p == int.class)     return CodeBlock.of(&quot;$T.anyInt()&quot;, MATCHERS);
+        if (p == long.class)    return CodeBlock.of(&quot;$T.anyLong()&quot;, MATCHERS);
+        if (p == double.class)  return CodeBlock.of(&quot;$T.anyDouble()&quot;, MATCHERS);
+        if (p == float.class)   return CodeBlock.of(&quot;$T.anyFloat()&quot;, MATCHERS);
+        if (p == short.class)   return CodeBlock.of(&quot;$T.anyShort()&quot;, MATCHERS);
+        if (p == byte.class)    return CodeBlock.of(&quot;$T.anyByte()&quot;, MATCHERS);
+        if (p == char.class)    return CodeBlock.of(&quot;$T.anyChar()&quot;, MATCHERS);
+        if (p == boolean.class) return CodeBlock.of(&quot;$T.anyBoolean()&quot;, MATCHERS);
+        return CodeBlock.of(&quot;$T.any($T.class)&quot;, MATCHERS, javaPoetType(p));
+    }
+
+    private static String primitiveDefaultExpr(Class&lt;?&gt; prim) {
+        if (prim == boolean.class) return &quot;false&quot;;
+        if (prim == char.class) return &quot;&#x27;\\0&#x27;&quot;;
+        if (prim == long.class) return &quot;0L&quot;;
+        if (prim == float.class) return &quot;0f&quot;;
+        if (prim == double.class) return &quot;0.0&quot;;
+        if (prim == byte.class) return &quot;(byte) 0&quot;;     // doReturn(int 0) on byte-returning mock -&gt; WrongTypeOfReturnValue
+        if (prim == short.class) return &quot;(short) 0&quot;;   // same for short
+        return &quot;0&quot;;   // int
+    }
+
+    private static List&lt;Method&gt; contractInstanceMethods(Class&lt;?&gt; sut) {
+        List&lt;Method&gt; declared = filterInstance(sut.getDeclaredMethods());
+        if (!isThin(declared)) {
+            return dedupe(declared);
+        }
+        LinkedHashSet&lt;Method&gt; contract = new LinkedHashSet&lt;&gt;(declared);
+        for (Class&lt;?&gt; iface : allInterfaces(sut)) {
+            contract.addAll(filterInstance(iface.getMethods()));
+        }
+        Class&lt;?&gt; parent = sut.getSuperclass();
+        if (parent != null &amp;&amp; parent != Object.class) {
+            contract.addAll(filterInstance(parent.getDeclaredMethods()));
+        }
+        return dedupe(new ArrayList&lt;&gt;(contract));
+    }
+
+    private static List&lt;Method&gt; contractStaticMethods(Class&lt;?&gt; sut) {
+        List&lt;Method&gt; declared = filterStatic(sut.getDeclaredMethods());
+        if (!declared.isEmpty()) {
+            return dedupe(declared);
+        }
+        LinkedHashSet&lt;Method&gt; contract = new LinkedHashSet&lt;&gt;();
+        for (Class&lt;?&gt; iface : allInterfaces(sut)) {
+            contract.addAll(filterStatic(iface.getMethods()));
+        }
+        Class&lt;?&gt; parent = sut.getSuperclass();
+        if (parent != null &amp;&amp; parent != Object.class) {
+            contract.addAll(filterStatic(parent.getDeclaredMethods()));
+        }
+        return dedupe(new ArrayList&lt;&gt;(contract));
+    }
+
+    private static boolean isThin(List&lt;Method&gt; declared) {
+        if (declared.isEmpty()) {
+            return true;
+        }
+        for (Method m : declared) {
+            if (!looksLikeAccessor(m)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean looksLikeAccessor(Method m) {
+        if (m.getParameterCount() != 0 || m.getReturnType() == void.class) {
+            return false;
+        }
+        String n = m.getName();
+        return n.startsWith(&quot;get&quot;) || n.startsWith(&quot;is&quot;);
+    }
+
+    private static List&lt;Class&lt;?&gt;&gt; allInterfaces(Class&lt;?&gt; type) {
+        LinkedHashSet&lt;Class&lt;?&gt;&gt; out = new LinkedHashSet&lt;&gt;();
+        Class&lt;?&gt; cur = type;
+        while (cur != null &amp;&amp; cur != Object.class) {
+            out.addAll(Arrays.asList(cur.getInterfaces()));
+            for (Class&lt;?&gt; iface : cur.getInterfaces()) {
+                collectInterfaces(iface, out);
+            }
+            cur = cur.getSuperclass();
+        }
+        return new ArrayList&lt;&gt;(out);
+    }
+
+    private static void collectInterfaces(Class&lt;?&gt; iface, Set&lt;Class&lt;?&gt;&gt; out) {
+        if (!out.add(iface)) {
+            return;
+        }
+        for (Class&lt;?&gt; parent : iface.getInterfaces()) {
+            collectInterfaces(parent, out);
+        }
+    }
+
+    private static List&lt;Method&gt; filterInstance(Method[] methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        for (Method m : methods) {
+            if (include(m) &amp;&amp; !java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static List&lt;Method&gt; filterStatic(Method[] methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        for (Method m : methods) {
+            if (include(m) &amp;&amp; java.lang.reflect.Modifier.isStatic(m.getModifiers())) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static List&lt;Method&gt; dedupe(List&lt;Method&gt; methods) {
+        List&lt;Method&gt; out = new ArrayList&lt;&gt;();
+        Set&lt;String&gt; seen = new HashSet&lt;&gt;();
+        for (Method m : methods) {
+            String key = m.getName() + Arrays.toString(m.getParameterTypes());
+            if (seen.add(key)) {
+                out.add(m);
+            }
+        }
+        return out;
+    }
+
+    private static boolean include(Method m) {
+        int mod = m.getModifiers();
+        if (!java.lang.reflect.Modifier.isPublic(mod)) {
+            return false;
+        }
+        if (m.isSynthetic() || m.isBridge()) {
+            return false;
+        }
+        String n = m.getName();
+        if (n.equals(&quot;equals&quot;) || n.equals(&quot;hashCode&quot;) || n.equals(&quot;toString&quot;) || n.equals(&quot;getClass&quot;)
+                || n.equals(&quot;notify&quot;) || n.equals(&quot;notifyAll&quot;) || n.equals(&quot;wait&quot;)) {
+            return false;
+        }
+        Class&lt;?&gt; dc = m.getDeclaringClass();
+        if (dc == Enum.class
+                || (dc.isEnum() &amp;&amp; (n.equals(&quot;values&quot;) || n.equals(&quot;valueOf&quot;) || n.equals(&quot;compareTo&quot;)))) {
+            return false;   // synthesized enum values()/valueOf/compareTo + java.lang.Enum internals
+        }
+        return true;
+    }
+
+    private static String safeName(Method m) {
+        String base = m.getName();
+        if (m.getParameterCount() == 0) {
+            return base;
+        }
+        return base + &quot;_&quot; + m.getParameterCount() + &quot;args&quot;;
+    }
+
+    private static String uniqueName(String base, Set&lt;String&gt; usedNames) {
+        String name = base;
+        int i = 2;
+        while (!usedNames.add(name)) {
+            name = base + &quot;_&quot; + i++;
+        }
+        return name;
+    }
+
+    private static String simpleParamName(Parameter p) {
+        String n = p.getName();
+        if (n == null || n.startsWith(&quot;arg&quot;)) {
+            n = p.getType().getSimpleName();
+        }
+        return n.replaceAll(&quot;[^A-Za-z0-9_]&quot;, &quot;&quot;);
+    }
+
+    private static Class&lt;?&gt; box(Class&lt;?&gt; primitive) {
+        if (primitive == boolean.class) return Boolean.class;
+        if (primitive == int.class) return Integer.class;
+        if (primitive == long.class) return Long.class;
+        if (primitive == double.class) return Double.class;
+        if (primitive == float.class) return Float.class;
+        if (primitive == short.class) return Short.class;
+        if (primitive == byte.class) return Byte.class;
+        if (primitive == char.class) return Character.class;
+        return primitive;
+    }
+
+    // ---- static / construction isolation: mockStatic / mockConstruction in try-with-resources ----
+
+    /** Parse the SUT method body for static-call targets and new&#x27;d types (project types only). */
+    private static SutStatics analyzeStaticsAndNew(Class&lt;?&gt; sut, Method method) {
+        try {
+            Path src = Config.mainSourceRoot().resolve(sut.getName().replace(&#x27;.&#x27;, &#x27;/&#x27;) + &quot;.java&quot;);
+            if (!Files.isRegularFile(src)) {
+                return null;
+            }
+            CompilationUnit cu = StaticJavaParser.parse(src);
+            String pkg = sut.getPackageName();
+            MethodDeclaration target = null;
+            for (MethodDeclaration md : cu.findAll(MethodDeclaration.class)) {
+                if (md.getNameAsString().equals(method.getName())
+                        &amp;&amp; md.getParameters().size() == method.getParameterCount()) {
+                    target = md;
+                    break;
+                }
+            }
+            if (target == null) {
+                return null;
+            }
+            LinkedHashSet&lt;Class&lt;?&gt;&gt; statics = new LinkedHashSet&lt;&gt;();
+            LinkedHashSet&lt;Class&lt;?&gt;&gt; constructed = new LinkedHashSet&lt;&gt;();
+            for (MethodCallExpr call : target.findAll(MethodCallExpr.class)) {
+                if (call.getScope().isPresent()) {
+                    com.github.javaparser.ast.expr.Expression s = call.getScope().get();
+                    String q = null;
+                    if (s instanceof NameExpr ne &amp;&amp; !ne.getNameAsString().isEmpty()
+                            &amp;&amp; Character.isUpperCase(ne.getNameAsString().charAt(0))) {
+                        q = ne.getNameAsString();                       // simple: Class.method()
+                    } else if (s instanceof com.github.javaparser.ast.expr.FieldAccessExpr fae) {
+                        q = fae.toString();                             // fully-qualified: com.pkg.Class.method()
+                    }
+                    if (q != null) {
+                        Class&lt;?&gt; c = q.contains(&quot;.&quot;) ? tryLoad(q) : resolveSimple(cu, pkg, q);
+                        if (c != null &amp;&amp; isProjectType(c) &amp;&amp; !c.equals(sut)) {
+                            statics.add(c);
+                        }
+                    }
+                } else {
+                    String mname = call.getNameAsString();              // no scope: static import?
+                    for (ImportDeclaration imp : cu.getImports()) {
+                        if (imp.isStatic() &amp;&amp; !imp.isAsterisk() &amp;&amp; imp.getNameAsString().endsWith(&quot;.&quot; + mname)) {
+                            String cls = imp.getNameAsString().substring(0, imp.getNameAsString().lastIndexOf(&#x27;.&#x27;));
+                            Class&lt;?&gt; c = tryLoad(cls);
+                            if (c != null &amp;&amp; isProjectType(c) &amp;&amp; !c.equals(sut)) {
+                                statics.add(c);
+                            }
+                        }
+                    }
+                }
+            }
+            for (ObjectCreationExpr oce : target.findAll(ObjectCreationExpr.class)) {
+                Class&lt;?&gt; c = resolveSimple(cu, pkg, oce.getType().getNameAsString());
+                if (c != null &amp;&amp; isProjectType(c) &amp;&amp; !c.equals(sut)) {   // never mock-construct the SUT&#x27;s own type
+                    constructed.add(c);
+                }
+            }
+            return new SutStatics(statics, constructed);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static Class&lt;?&gt; resolveSimple(CompilationUnit cu, String sutPkg, String simple) {
+        for (ImportDeclaration imp : cu.getImports()) {
+            if (!imp.isAsterisk() &amp;&amp; imp.getNameAsString().endsWith(&quot;.&quot; + simple)) {
+                Class&lt;?&gt; c = tryLoad(imp.getNameAsString());
+                if (c != null) {
+                    return c;
+                }
+            }
+        }
+        Class&lt;?&gt; c = tryLoad(sutPkg + &quot;.&quot; + simple);
+        return (c != null) ? c : tryLoad(&quot;java.lang.&quot; + simple);
+    }
+
+    private static Class&lt;?&gt; tryLoad(String fqn) {
+        try {
+            return Class.forName(fqn, false, TestSkeletonGenerator.class.getClassLoader());
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** try-with-resources header: one MockedStatic per static target, one MockedConstruction per new&#x27;d type. */
+    private static CodeBlock mockScopeResources(SutStatics st) {
+        CodeBlock.Builder r = CodeBlock.builder();
+        boolean first = true;
+        for (Class&lt;?&gt; x : st.staticTargets()) {
+            if (!first) {
+                r.add(&quot;;\n&quot;);
+            }
+            first = false;
+            r.add(&quot;$T&lt;$T&gt; $L = $T.mockStatic($T.class)&quot;,
+                    MOCKED_STATIC, ClassName.get(x), msVar(x), MOCKITO, ClassName.get(x));
+        }
+        for (Class&lt;?&gt; y : st.constructedTypes()) {
+            if (!first) {
+                r.add(&quot;;\n&quot;);
+            }
+            first = false;
+            CodeBlock init = minimalStubs(new MockRef(y, &quot;cm&quot;));   // stub the constructed mock&#x27;s own methods
+            if (init.isEmpty()) {
+                r.add(&quot;$T&lt;$T&gt; $L = $T.mockConstruction($T.class)&quot;,
+                        MOCKED_CONSTRUCTION, ClassName.get(y), mcVar(y), MOCKITO, ClassName.get(y));
+            } else {   // 2-arg form: else new T() returns a mock whose methods return null -&gt; caller NPEs
+                r.add(&quot;$T&lt;$T&gt; $L = $T.mockConstruction($T.class, (cm, context) -&gt; {\n$&gt;$L$&lt;})&quot;,
+                        MOCKED_CONSTRUCTION, ClassName.get(y), mcVar(y), MOCKITO, ClassName.get(y), init);
+            }
+        }
+        return r.build();
+    }
+
+    /** Stub each static target&#x27;s non-void static methods so the isolated call graph does not NPE. */
+    private static void emitStaticStubs(MethodSpec.Builder b, SutStatics st, Class&lt;?&gt; sut) {
+        for (Class&lt;?&gt; x : st.staticTargets()) {
+            for (Method sm : x.getDeclaredMethods()) {
+                if (!java.lang.reflect.Modifier.isStatic(sm.getModifiers()) || !include(sm)) {
+                    continue;
+                }
+                java.lang.reflect.Type gret = sm.getGenericReturnType();
+                Class&lt;?&gt; ret = sm.getReturnType();
+                if (ret == void.class) {
+                    continue;
+                }
+                CodeBlock matchers = anyMatchers(sm.getParameterTypes());
+                if (ret.isPrimitive()) {
+                    b.addStatement(&quot;$L.when(() -&gt; $T.$L($L)).thenReturn($L)&quot;,
+                            msVar(x), ClassName.get(x), sm.getName(), matchers, primitiveDefaultExpr(ret));
+                } else if (isTypeVarReturn(gret)) {   // unresolved static type-var: null (a bare Object would CCE)
+                    b.addStatement(&quot;$L.when(() -&gt; $T.$L($L)).thenReturn(null)&quot;,
+                            msVar(x), ClassName.get(x), sm.getName(), matchers);
+                } else {
+                    CodeBlock rv = classReturnStub(gret);   // Class&lt;...&gt; -&gt; X.class
+                    if (rv == null) rv = optionalReturnStub(gret);   // real Optional, not mock
+                    if (rv == null) rv = entryReturnStub(gret);   // real Map.entry, not mock
+                    if (rv == null) rv = futureReturnStub(gret);   // real completed future, not mock
+                    if (rv == null) rv = stubValue(ret);
+                    b.addStatement(&quot;$L.when(() -&gt; $T.$L($L)).thenReturn($L)&quot;,
+                            msVar(x), ClassName.get(x), sm.getName(), matchers, rv);
+                }
+            }
+            b.addCode(staticFactoryStubs(sut, x));   // call-site X.class binds a static &lt;T&gt; T m(Class&lt;T&gt;) factory
+        }
+    }
+
+    /** Static analog of {@link #factoryStubs}: for {@code X.m(Y.class)} call sites on a static factory,
+     *  emit {@code msVar.when(() -&gt; X.m(eq(Y.class))).thenReturn(&lt;value Y&gt;)}. */
+    private static CodeBlock staticFactoryStubs(Class&lt;?&gt; sut, Class&lt;?&gt; collab) {
+        CodeBlock.Builder out = CodeBlock.builder();
+        try {
+            Path src = Config.mainSourceRoot().resolve(sut.getName().replace(&#x27;.&#x27;, &#x27;/&#x27;) + &quot;.java&quot;);
+            if (!Files.isRegularFile(src)) return out.build();
+            CompilationUnit cu = StaticJavaParser.parse(src);
+            String pkg = sut.getPackageName();
+            java.util.Set&lt;String&gt; seen = new java.util.HashSet&lt;&gt;();
+            for (MethodCallExpr call : cu.findAll(MethodCallExpr.class)) {
+                if (call.getScope().isEmpty()) continue;
+                com.github.javaparser.ast.expr.Expression scope = call.getScope().get();
+                String scopeName = scope instanceof NameExpr ne ? ne.getNameAsString() : scope.toString();
+                if (!collab.getSimpleName().equals(scopeName) &amp;&amp; !collab.getName().equals(scopeName)) continue;
+                int[] pos = {-1};
+                Class&lt;?&gt; y = classArg(call, cu, pkg, pos);
+                if (y == null) continue;
+                Method fm = factoryMethod(collab, call.getNameAsString(), call.getArguments().size(), pos[0]);
+                if (fm == null || !java.lang.reflect.Modifier.isStatic(fm.getModifiers())) continue;
+                if (!seen.add(call.getNameAsString() + &quot;|&quot; + pos[0] + &quot;|&quot; + y.getName())) continue;
+                out.addStatement(&quot;$L.when(() -&gt; $T.$L($L)).thenReturn($L)&quot;,
+                        msVar(collab), ClassName.get(collab), call.getNameAsString(),
+                        factoryMatchers(fm, pos[0], y), stubValue(y));
+            }
+        } catch (Throwable ignored) {
+            // best-effort
+        }
+        return out.build();
+    }
+
+    private static String msVar(Class&lt;?&gt; x) {
+        return &quot;ms&quot; + x.getSimpleName();
+    }
+
+    private static String mcVar(Class&lt;?&gt; y) {
+        return &quot;mc&quot; + y.getSimpleName();
+    }
+
+    /**
+     * TG-BOILERDET: detected facades never get mockStatic/mockConstruction — the delegate-swap
+     * fixture controls them, and a static mock of the facade is exactly the collision the play
+     * exists to remove.
+     */
+    private static SutStatics suppressFacades(SutStatics st, Set&lt;Class&lt;?&gt;&gt; facadeSuppress) {
+        if (st == null || facadeSuppress.isEmpty()) {
+            return st;
+        }
+        LinkedHashSet&lt;Class&lt;?&gt;&gt; statics = new LinkedHashSet&lt;&gt;(st.staticTargets());
+        LinkedHashSet&lt;Class&lt;?&gt;&gt; constructed = new LinkedHashSet&lt;&gt;(st.constructedTypes());
+        statics.removeAll(facadeSuppress);
+        constructed.removeAll(facadeSuppress);
+        return new SutStatics(statics, constructed);
+    }
+
+    private record SutStatics(Set&lt;Class&lt;?&gt;&gt; staticTargets, Set&lt;Class&lt;?&gt;&gt; constructedTypes) {}
+
+    private record MockRef(Class&lt;?&gt; type, String varName) {}
+
+    private record FieldMockRef(Class&lt;?&gt; type, String varName, Class&lt;?&gt; declaringClass, String fieldName,
+                                boolean skipStub) {}
+}
+</pre>
+<h4>Runner.java</h4>
+<pre>package com.testgen;
+
+import com.config.Config;
+import com.testgen.graphs.CallChainScanner;
+import com.testgen.graphs.DataFlowScanner;
+import com.testgen.graphs.DepGraphMarker;
+import com.testgen.graphs.DepGraphScanner;
+
+import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.StaticJavaParser;
+
+/**
+ * IntelliJ entry point. Mark {@code testgen/} as Test Sources, set Run WD to the
+ * SUT module root, then Run. Comment out any call in {@link #main} to skip a step.
+ */
+public final class Runner {
+
+    private Runner() {}
+
+    public static void main(String[] args) throws Exception {
+        // Parse modern Java (records/sealed/text-blocks) — JavaParser defaults to an old level.
+        StaticJavaParser.getParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_21);
+        if (Config.STRIP) {
+            strip();   // reverse pass: remove the graph block; no scan, no generate
+            return;
+        }
+
+        dependencies();
+        callChain();
+        dataFlow();
+        embed();
+        generate();
+    }
+
+    static void callChain() throws Exception {
+        CallChainScanner.run();
+    }
+
+    static void dataFlow() throws Exception {
+        DataFlowScanner.run();
+    }
+
+    static void dependencies() throws Exception {
+        DepGraphScanner.run();
+    }
+
+    static void embed() throws Exception {
+        DepGraphMarker.embed();
+    }
+
+    static void strip() throws Exception {
+        DepGraphMarker.strip();
+    }
+
+    static void generate() throws Exception {
+        TestSkeletonGenerator.run();
+    }
+}
+</pre>
+<h4>Config.java</h4>
+<pre>package com.config;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+/**
+ * Drop-in contract: Run working directory = SUT module root.
+ * This folder lives at {@code MODULE/testgen/}.
+ */
+public final class Config {
+
+    /** SUT module root = process working directory. */
+    public static final Path MODULE = Path.of(&quot;&quot;).toAbsolutePath().normalize();
+
+    /**
+     * Production source root.
+     * null &#8594; {@code MODULE/src/main/java}
+     */
+    public static final Path MAIN_SOURCES = null;
+
+    /**
+     * Test source root (skeletons written here).
+     * null &#8594; {@code MODULE/src/test/java}
+     */
+    public static final Path TEST_SOURCES = null;
+
+    public static final String TEST_NAME_SUFFIX = &quot;Test&quot;;
+
+    /**
+     * {@code true}: inject step removes dependency-graph markers from source (no inject).
+     * {@code false}: inject step writes dependency-graph markers into source.
+     */
+    public static final boolean STRIP = false;
+
+    /**
+     * {@code false} (default): generated stubs cover only methods declared by project classes;
+     * third-party/JDK collaborators are mocked but left unstubbed.
+     * {@code true}: stub every method of a mocked collaborator, including third-party/JDK.
+     */
+    public static final boolean STUB_THIRD_PARTY = false;
+
+    /**
+     * TWEAK-POINT: where emitted fixtures live. Flip HERE and re-run the Runner (IntelliJ Run
+     * works; nothing else needed).
+     *   &quot;SHARED&quot; = fixture files written once under testsupport/; each test class calls them.
+     *   &quot;NESTED&quot; = the SAME fixture nested privately inside every detected test class - fully
+     *              self-contained files, no shared test code.
+     */
+    public static final String FIXTURE_PLACEMENT = &quot;SHARED&quot;;
+
+    /**
+     * TWEAK-POINT: what the emitted config fixture swaps in.
+     *   &quot;MOCK&quot;   = a Mockito mock of the backing delegate; tests stub the values they care about.
+     *   &quot;SEEDED&quot; = a REAL backing delegate populated with keys found in the scanned source, each
+     *              set to the placeholder value below - adjust values per project as needed.
+     */
+    public static final String CONFIG_PAYLOAD = &quot;MOCK&quot;;
+
+    /** TWEAK-POINT: placeholder value under every discovered key in SEEDED mode. */
+    public static final String SEEDED_PLACEHOLDER_VALUE = &quot;5000&quot;;
+
+    /** Call-chain recursion depth (ROADMAP tool 2). */
+    public static final int CALL_CHAIN_MAX_DEPTH = 3;
+
+    /** Cap edges emitted per method in call-chain. */
+    public static final int CALL_CHAIN_MAX_EDGES = 40;
+
+    private Config() {}
+
+    /**
+     * Optional method targets: {@code fqcn} or {@code fqcn#method} per line.
+     * If missing/empty, falls back to all public methods of {@link #classesList()}.
+     */
+    public static Path methodsList() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;methods.txt&quot;);
+    }
+
+    /** Method targets for call-chain / data-flow; defaults to classes.txt FQCNs. */
+    public static List&lt;String&gt; readMethodTargets() throws Exception {
+        Path list = methodsList();
+        if (Files.isRegularFile(list)) {
+            List&lt;String&gt; lines = Files.readAllLines(list).stream()
+                    .map(String::trim)
+                    .filter(line -&gt; !line.isEmpty() &amp;&amp; !line.startsWith(&quot;#&quot;))
+                    .toList();
+            if (!lines.isEmpty()) {
+                return lines;
+            }
+        }
+        return readClasses();
+    }
+
+    /** {@code MODULE/testgen/classes.txt} */
+    public static Path classesList() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;classes.txt&quot;);
+    }
+
+    /** {@code MODULE/testgen/reports} */
+    public static Path reportsDir() {
+        return MODULE.resolve(&quot;testgen&quot;).resolve(&quot;reports&quot;);
+    }
+
+    public static Path mainSourceRoot() {
+        return MAIN_SOURCES != null
+                ? MAIN_SOURCES.toAbsolutePath().normalize()
+                : MODULE.resolve(&quot;src&quot;).resolve(&quot;main&quot;).resolve(&quot;java&quot;);
+    }
+
+    public static Path testSourceRoot() {
+        return TEST_SOURCES != null
+                ? TEST_SOURCES.toAbsolutePath().normalize()
+                : MODULE.resolve(&quot;src&quot;).resolve(&quot;test&quot;).resolve(&quot;java&quot;);
+    }
+
+    public static List&lt;String&gt; readClasses() throws Exception {
+        Path list = classesList();
+        if (!Files.isRegularFile(list)) {
+            throw new IllegalStateException(&quot;classes list not found: &quot; + list);
+        }
+        return Files.readAllLines(list).stream()
+                .map(String::trim)
+                .filter(line -&gt; !line.isEmpty() &amp;&amp; !line.startsWith(&quot;#&quot;))
+                .toList();
+    }
+}
+</pre>
+<h4>graphs/CallChainScanner.java</h4>
+<pre>package com.testgen.graphs;
+
+import com.config.Config;
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.expr.Expression;
+import com.github.javaparser.ast.expr.FieldAccessExpr;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
+import com.github.javaparser.ast.expr.VariableDeclarationExpr;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * ROADMAP tool 2: static call-chain from SUT methods (JavaParser, source-only).
+ * Output: {@code MODULE/testgen/reports/callchain/{Fqcn}__{method}.md}
+ */
+public final class CallChainScanner {
+
+    private CallChainScanner() {}
+
+    public static void run() throws Exception {
+        Path outDir = Config.reportsDir().resolve(&quot;callchain&quot;);
+        Files.createDirectories(outDir);
+        Path root = Config.mainSourceRoot();
+        int maxDepth = Math.max(1, Config.CALL_CHAIN_MAX_DEPTH);
+        int wrote = 0;
+        for (String target : Config.readMethodTargets()) {
+            try {
+                String fqcn = target;
+                String method = null;
+                int hash = target.indexOf(&#x27;#&#x27;);
+                if (hash &gt; 0) {
+                    fqcn = target.substring(0, hash).trim();
+                    method = target.substring(hash + 1).trim();
+                }
+                if (method == null || method.isBlank()) {
+                    java.util.Map&lt;String,Integer&gt; seen = new java.util.HashMap&lt;&gt;();
+                    for (String m : listPublicMethods(root, fqcn)) {
+                        int n = seen.merge(m, 1, Integer::sum);
+                        String fileKey = (n == 1) ? m : m + &quot;_&quot; + n;   // BUG-1: overloads must not overwrite
+                        wrote += writeOne(outDir, root, fqcn, m, fileKey, maxDepth) ? 1 : 0;
+                    }
+                } else {
+                    wrote += writeOne(outDir, root, fqcn, method, method, maxDepth) ? 1 : 0;
+                }
+            } catch (Throwable t) {   // isolate per-target: one bad target must not abort the batch
+                System.out.println(&quot;SKIP callchain &quot; + target + &quot; -&gt; &quot; + t.getClass().getSimpleName()
+                        + &quot;: &quot; + t.getMessage());
+            }
+        }
+        System.out.println(&quot;CallChain done. &quot; + wrote + &quot; report(s) in &quot; + outDir.toAbsolutePath());
+    }
+
+    private static boolean writeOne(Path outDir, Path root, String fqcn, String method, String fileKey, int maxDepth)
+            throws Exception {
+        String md = analyze(root, fqcn, method, maxDepth);
+        Path out = outDir.resolve(fqcn + &quot;__&quot; + fileKey + &quot;.md&quot;);   // BUG-1: fileKey disambiguates overloads
+        Files.writeString(out, md);
+        System.out.println(&quot;Wrote &quot; + out);
+        return true;
+    }
+
+    public static String analyze(Path mainSourceRoot, String fqcn, String method, int maxDepth) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        sb.append(&quot;# callchain\n&quot;);
+        sb.append(&quot;sut: &quot;).append(fqcn).append(&#x27;#&#x27;).append(method).append(&#x27;\n&#x27;);
+        sb.append(&quot;maxDepth: &quot;).append(maxDepth).append(&#x27;\n&#x27;);
+        sb.append(&#x27;\n&#x27;);
+        List&lt;String&gt; lines = new ArrayList&lt;&gt;();
+        walk(mainSourceRoot, fqcn, method, 0, maxDepth, new LinkedHashSet&lt;&gt;(), lines, &quot;&quot;);
+        if (lines.isEmpty()) {
+            sb.append(&quot;- (no outbound calls found or source missing)\n&quot;);
+        } else {
+            for (String line : lines) {
+                sb.append(line).append(&#x27;\n&#x27;);
+            }
+        }
+        sb.append(&#x27;\n&#x27;);
+        sb.append(&quot;## notes\n&quot;);
+        sb.append(&quot;- Static only; no reflection/DI/poly resolution.\n&quot;);
+        return sb.toString();
+    }
+
+    private static void walk(
+            Path root,
+            String fqcn,
+            String method,
+            int depth,
+            int maxDepth,
+            Set&lt;String&gt; stack,
+            List&lt;String&gt; out,
+            String indent) throws Exception {
+        if (depth &gt;= maxDepth) {
+            return;
+        }
+        String key = fqcn + &quot;#&quot; + method;
+        if (!stack.add(key)) {
+            out.add(indent + &quot;- (cycle &quot; + key + &quot;)&quot;);
+            return;
+        }
+        Path src = sourcePath(root, fqcn);
+        if (!Files.isRegularFile(src)) {
+            out.add(indent + &quot;- (no source &quot; + fqcn + &quot;)&quot;);
+            stack.remove(key);
+            return;
+        }
+        CompilationUnit cu = StaticJavaParser.parse(src);
+        Optional&lt;MethodDeclaration&gt; md = findMethod(cu, simpleName(fqcn), method);
+        if (md.isEmpty()) {
+            out.add(indent + &quot;- (method not found &quot; + key + &quot;)&quot;);
+            stack.remove(key);
+            return;
+        }
+        String pkg = cu.getPackageDeclaration().map(p -&gt; p.getNameAsString()).orElse(&quot;&quot;);
+        Map&lt;String, String&gt; fieldTypes = fieldTypes(cu, simpleName(fqcn));
+        Map&lt;String, String&gt; localTypes = localVarTypes(md.get(), cu, pkg);
+        for (ObjectCreationExpr oce : md.get().findAll(ObjectCreationExpr.class)) {
+            String t = resolveTypeName(cu, pkg, oce.getType().getNameAsString());
+            String loc = src.getFileName() + &quot;:&quot; + oce.getBegin().map(p -&gt; p.line).orElse(-1);
+            out.add(indent + &quot;- &quot; + simpleName(fqcn) + &quot;.&quot; + method + &quot; -&gt; new &quot; + simpleName(t) + &quot; (&quot; + loc + &quot;)&quot;);
+        }
+        int n = 0;
+        for (MethodCallExpr call : md.get().findAll(MethodCallExpr.class)) {
+            if (n++ &gt;= Config.CALL_CHAIN_MAX_EDGES) {
+                out.add(indent + &quot;- … capped&quot;);
+                break;
+            }
+            String calleeName = call.getNameAsString();
+            String scopeType = resolveScopeType(call, root, fieldTypes, localTypes, cu, pkg, fqcn);
+            String loc = src.getFileName() + &quot;:&quot; + call.getBegin().map(p -&gt; p.line).orElse(-1);
+            String edge = simpleName(fqcn) + &quot;.&quot; + method + &quot; -&gt; &quot;
+                    + (scopeType != null ? simpleName(scopeType) + &quot;.&quot; : &quot;&quot;)
+                    + calleeName + &quot; (&quot; + loc + &quot;)&quot;;
+            out.add(indent + &quot;- &quot; + edge);
+            if (scopeType != null &amp;&amp; !scopeType.startsWith(&quot;java.&quot;) &amp;&amp; depth + 1 &lt; maxDepth) {
+                walk(root, scopeType, calleeName, depth + 1, maxDepth, stack, out, indent + &quot;  &quot;);
+            }
+        }
+        stack.remove(key);
+    }
+
+    private static String resolveScopeType(MethodCallExpr call, Path root, Map&lt;String, String&gt; fieldTypes,
+            Map&lt;String, String&gt; localTypes, CompilationUnit cu, String pkg, String ownerFqcn) {
+        Optional&lt;Expression&gt; scope = call.getScope();
+        if (scope.isEmpty()) {
+            return ownerFqcn; // same class / this
+        }
+        Expression s = scope.get();
+        if (s instanceof NameExpr ne) {
+            String n = ne.getNameAsString();
+            if (&quot;this&quot;.equals(n)) {
+                return ownerFqcn;
+            }
+            if (localTypes.containsKey(n)) {
+                return localTypes.get(n);   // local variable / parameter receiver
+            }
+            if (fieldTypes.containsKey(n)) {
+                return fieldTypes.get(n);
+            }
+            if (!n.isEmpty() &amp;&amp; Character.isUpperCase(n.charAt(0))) {
+                return resolveTypeName(cu, pkg, n);   // static-class receiver
+            }
+            return null;
+        }
+        if (s instanceof FieldAccessExpr fa &amp;&amp; &quot;this&quot;.equals(fa.getScope().toString())) {
+            return fieldTypes.get(fa.getNameAsString());
+        }
+        if (s instanceof MethodCallExpr inner) {
+            // chained call a().b(): resolve inner receiver, then look up inner&#x27;s DECLARED return type
+            String innerOwner = resolveScopeType(inner, root, fieldTypes, localTypes, cu, pkg, ownerFqcn);
+            if (innerOwner != null) {
+                return returnTypeOf(root, innerOwner, inner.getNameAsString());
+            }
+        }
+        return null;
+    }
+
+    /** Declared return type of ownerFqcn#methodName, resolved to a FQN (deterministic, from source). */
+    private static String returnTypeOf(Path root, String ownerFqcn, String methodName) {
+        try {
+            Path src = sourcePath(root, ownerFqcn);
+            if (!Files.isRegularFile(src)) {
+                return null;
+            }
+            CompilationUnit ocu = StaticJavaParser.parse(src);
+            String opkg = ocu.getPackageDeclaration().map(p -&gt; p.getNameAsString()).orElse(&quot;&quot;);
+            for (MethodDeclaration m : ocu.findAll(MethodDeclaration.class)) {
+                if (m.getNameAsString().equals(methodName)) {
+                    String rt = m.getType().asString();
+                    return &quot;void&quot;.equals(rt) ? null : resolveTypeName(ocu, opkg, rt);
+                }
+            }
+        } catch (Throwable ignored) { }
+        return null;
+    }
+
+    /** Local variable + parameter names -&gt; resolved (erased) type, for receiver resolution. */
+    private static Map&lt;String, String&gt; localVarTypes(MethodDeclaration md, CompilationUnit cu, String pkg) {
+        Map&lt;String, String&gt; map = new LinkedHashMap&lt;&gt;();
+        for (VariableDeclarationExpr v : md.findAll(VariableDeclarationExpr.class)) {
+            v.getVariables().forEach(var -&gt; {
+                String t = var.getType().asString().replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).trim();
+                if (!t.isEmpty() &amp;&amp; Character.isJavaIdentifierStart(t.charAt(0))) {
+                    map.put(var.getNameAsString(), resolveTypeName(cu, pkg, t));
+                }
+            });
+        }
+        md.getParameters().forEach(p -&gt; {
+            String t = p.getType().asString().replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).trim();
+            if (!t.isEmpty() &amp;&amp; Character.isJavaIdentifierStart(t.charAt(0))) {
+                map.put(p.getNameAsString(), resolveTypeName(cu, pkg, t));
+            }
+        });
+        return map;
+    }
+
+    /** Resolve a simple type name to a FQN via imports, then java.lang, else same package. */
+    private static String resolveTypeName(CompilationUnit cu, String pkg, String simple) {
+        String bare = simple.replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).replace(&quot;[]&quot;, &quot;&quot;).trim();
+        if (bare.contains(&quot;.&quot;)) {
+            return bare;
+        }
+        for (ImportDeclaration imp : cu.getImports()) {
+            if (!imp.isAsterisk() &amp;&amp; imp.getNameAsString().endsWith(&quot;.&quot; + bare)) {
+                return imp.getNameAsString();
+            }
+        }
+        if (isJavaLang(bare)) {
+            return &quot;java.lang.&quot; + bare;
+        }
+        return (bare.isEmpty() || pkg.isEmpty()) ? bare : pkg + &quot;.&quot; + bare;
+    }
+
+    private static boolean isJavaLang(String simple) {
+        try {
+            Class.forName(&quot;java.lang.&quot; + simple);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static Map&lt;String, String&gt; fieldTypes(CompilationUnit cu, String simple) {
+        Map&lt;String, String&gt; map = new LinkedHashMap&lt;&gt;();
+        for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            if (!c.getNameAsString().equals(simple)) {
+                continue;
+            }
+            c.getFields().forEach(f -&gt; f.getVariables().forEach(v -&gt; {
+                String type = f.getElementType().asString().replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).trim();  // erase generics
+                String pkg = cu.getPackageDeclaration().map(p -&gt; p.getNameAsString()).orElse(&quot;&quot;);
+                if (type.isEmpty() || !Character.isJavaIdentifierStart(type.charAt(0))) {
+                    return;
+                }
+                // Route through the import-aware resolver like every other path; the old inline
+                // pkg-concat mis-packaged imported field types (TG-HOP2NAMES root cause).
+                map.put(v.getNameAsString(), resolveTypeName(cu, pkg, type));
+            }));
+        }
+        return map;
+    }
+
+    private static Optional&lt;MethodDeclaration&gt; findMethod(CompilationUnit cu, String simple, String method) {
+        for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            if (!c.getNameAsString().equals(simple)) {
+                continue;
+            }
+            for (MethodDeclaration m : c.getMethods()) {
+                if (m.getNameAsString().equals(method)) {
+                    return Optional.of(m);
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    static List&lt;String&gt; listPublicMethods(Path root, String fqcn) throws Exception {
+        Path src = sourcePath(root, fqcn);
+        List&lt;String&gt; names = new ArrayList&lt;&gt;();
+        if (!Files.isRegularFile(src)) {
+            return names;
+        }
+        CompilationUnit cu = StaticJavaParser.parse(src);
+        String simple = simpleName(fqcn);
+        for (ClassOrInterfaceDeclaration c : cu.findAll(ClassOrInterfaceDeclaration.class)) {
+            if (!c.getNameAsString().equals(simple)) {
+                continue;
+            }
+            for (MethodDeclaration m : c.getMethods()) {
+                if (m.isPublic() &amp;&amp; !m.getNameAsString().equals(&quot;main&quot;)) {
+                    names.add(m.getNameAsString());
+                }
+            }
+        }
+        return names;
+    }
+
+    private static Path sourcePath(Path root, String fqcn) {
+        String clean = fqcn.replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).trim();   // never allow a generic/illegal name in a path
+        Path direct = root.resolve(clean.replace(&#x27;.&#x27;, &#x27;/&#x27;) + &quot;.java&quot;);
+        if (Files.isRegularFile(direct)) {
+            return direct;
+        }
+        // Nested types live in their OUTER class&#x27;s file (TG-HOP2NAMES: a.b.Outer.Inner or
+        // Outer$Inner has no Inner.java). Walk trailing segments up until a file exists; the
+        // declaration is then found by simple name inside that compilation unit.
+        String walk = clean.replace(&#x27;$&#x27;, &#x27;.&#x27;);
+        int cut;
+        while ((cut = walk.lastIndexOf(&#x27;.&#x27;)) &gt; 0) {
+            walk = walk.substring(0, cut);
+            Path outer = root.resolve(walk.replace(&#x27;.&#x27;, &#x27;/&#x27;) + &quot;.java&quot;);
+            if (Files.isRegularFile(outer)) {
+                return outer;
+            }
+        }
+        // Resolvers emit package+Simple for same-file nested types, so the outer name is not in
+        // the FQCN at all. Last resort: scan the package directory for the file DECLARING the
+        // simple name (bounded to one directory; deterministic first match in sorted order).
+        int lastDot = clean.lastIndexOf(&#x27;.&#x27;);
+        if (lastDot &gt; 0) {
+            Path pkgDir = root.resolve(clean.substring(0, lastDot).replace(&#x27;.&#x27;, &#x27;/&#x27;));
+            String simple = clean.substring(lastDot + 1);
+            if (Files.isDirectory(pkgDir)) {
+                try (var files = Files.list(pkgDir)) {
+                    for (Path candidate : files.filter(f -&gt; f.toString().endsWith(&quot;.java&quot;))
+                            .sorted().toList()) {
+                        try {
+                            CompilationUnit cu = StaticJavaParser.parse(candidate);
+                            if (cu.findAll(ClassOrInterfaceDeclaration.class).stream()
+                                    .anyMatch(c -&gt; c.getNameAsString().equals(simple))) {
+                                return candidate;
+                            }
+                        } catch (Throwable ignored) { }
+                    }
+                } catch (Throwable ignored) { }
+            }
+        }
+        return direct;   // original (missing) path: callers report &quot;(no source ...)&quot; honestly
+    }
+
+    private static String simpleName(String fqcn) {
+        int i = fqcn.lastIndexOf(&#x27;.&#x27;);
+        return i &lt; 0 ? fqcn : fqcn.substring(i + 1);
+    }
+}
+</pre>
+<h3>NEW in v3.5</h3>
+<h4>fixtures/SMCFixtureScanner.java</h4>
+<pre>package com.testgen.fixtures;
+
+import com.config.Config;
+
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.ImportDeclaration;
+import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.expr.NameExpr;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * TG-BOILERDET detection pass: statically decide, per SUT, whether the test needs the
+ * delegate-swap boilerplate (mockito-static-lab LoggerFixture/ConfigFixture play).
+ *
+ * A FACADE is a project class F with a static accessor returning F (singleton shape) and at
+ * least one swappable delegate field (non-final static, or instance, reference-typed state the
+ * lab play swaps and restores). A SUT CONSUMES a facade when the SUT, a superclass, or a hop-1
+ * collaborator (field / constructor-param project type) declares a field of type F or calls
+ * F&#x27;s static accessor in source — this catches config-in-constructor and static-init reads.
+ *
+ * Pure detection: no source is modified; the skeleton generator decides what to emit.
+ *
+ * WHY THESE TARGETS - the three-leg test. Most statics are harmless furniture; a fixture is
+ * needed only when all three legs hold:
+ *   1. SHARED    - static state: one copy per JVM, every test touches the same one.
+ *   2. MUTABLE   - it can change after birth: a swappable delegate, a map, settable levels.
+ *   3. CONSULTED - the behaviour under test actually reads or writes it.
+ * Static methods hold no state (nothing leaks); static final constants cannot change (nothing
+ * to undo); static nested classes are naming only. Logger, config, cache and JNDI registries
+ * pass all three legs - that family is what this scanner hunts, and the three legs are exactly
+ * the checks encoded in facadeShape/swappableDelegates/consumer detection below.
+ */
+public final class SMCFixtureScanner {
+
+    private SMCFixtureScanner() {}
+
+    /** One swappable delegate on a facade. */
+    public record DelegateField(String name, Class&lt;?&gt; type, boolean staticField, boolean mapShaped) {}
+
+    /** One detected facade with its accessor and swappable delegates. */
+    public record Facade(Class&lt;?&gt; facadeClass, Method accessor, List&lt;DelegateField&gt; delegates) {
+
+        /** True when any delegate is instance-scoped, so the fixture must fetch the singleton. */
+        boolean needsInstance() {
+            return delegates.stream().anyMatch(d -&gt; !d.staticField());
+        }
+    }
+
+    /**
+     * Detects every facade the SUT-set consumes. Deterministic order: SUT first, then parents,
+     * then collaborators in declaration order.
+     */
+    public static List&lt;Facade&gt; detect(Class&lt;?&gt; sut) {
+        LinkedHashSet&lt;Class&lt;?&gt;&gt; consumerSet = consumerSet(sut);
+        LinkedHashSet&lt;Class&lt;?&gt;&gt; facadeClasses = new LinkedHashSet&lt;&gt;();
+
+        for (Class&lt;?&gt; consumer : consumerSet) {
+            collectFacadesFromFields(consumer, facadeClasses);
+            collectFacadesFromSource(consumer, facadeClasses);
+            collectFacadesFromSignatures(consumer, facadeClasses);
+        }
+        facadeClasses.remove(sut);   // a facade never needs a fixture inside its own test
+
+        List&lt;Facade&gt; out = new ArrayList&lt;&gt;();
+        for (Class&lt;?&gt; f : facadeClasses) {
+            Facade facade = asFacade(f);
+            if (facade != null) {
+                out.add(facade);
+            }
+        }
+        return out;
+    }
+
+    /** Facade classes for one SUT as a set, for suppressing mockStatic on them. */
+    public static Set&lt;Class&lt;?&gt;&gt; facadeClasses(List&lt;Facade&gt; facades) {
+        LinkedHashSet&lt;Class&lt;?&gt;&gt; out = new LinkedHashSet&lt;&gt;();
+        for (Facade f : facades) {
+            out.add(f.facadeClass());
+        }
+        return out;
+    }
+
+    /** SUT + superclass chain (stop at java.*) + hop-1 collaborator project types. */
+    private static LinkedHashSet&lt;Class&lt;?&gt;&gt; consumerSet(Class&lt;?&gt; sut) {
+        LinkedHashSet&lt;Class&lt;?&gt;&gt; out = new LinkedHashSet&lt;&gt;();
+        Class&lt;?&gt; cur = sut;
+        while (cur != null &amp;&amp; cur != Object.class &amp;&amp; !cur.getName().startsWith(&quot;java.&quot;)) {
+            out.add(cur);
+            cur = cur.getSuperclass();
+        }
+        for (Class&lt;?&gt; base : new ArrayList&lt;&gt;(out)) {
+            for (Field f : base.getDeclaredFields()) {
+                if (!f.isSynthetic() &amp;&amp; isProjectClass(baseType(f.getType()))) {
+                    out.add(baseType(f.getType()));
+                }
+            }
+            for (var ctor : base.getDeclaredConstructors()) {
+                for (Class&lt;?&gt; p : ctor.getParameterTypes()) {
+                    if (isProjectClass(baseType(p))) {
+                        out.add(baseType(p));
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Field of a facade-shaped project type anywhere in the consumer &#8594; facade hit. */
+    private static void collectFacadesFromFields(Class&lt;?&gt; consumer, Set&lt;Class&lt;?&gt;&gt; out) {
+        for (Field f : consumer.getDeclaredFields()) {
+            if (f.isSynthetic()) {
+                continue;
+            }
+            Class&lt;?&gt; ft = baseType(f.getType());
+            if (ft != consumer &amp;&amp; isProjectClass(ft) &amp;&amp; asFacade(ft) != null) {
+                out.add(ft);
+            }
+        }
+    }
+
+    /**
+     * TWEAK-POINT (detection): static call {@code F.accessor(...)} in the consumer&#x27;s source —
+     * simple name (resolved through imports/package) OR fully-qualified — and facade-typed
+     * LOCAL VARIABLE declarations. Method bodies are the reliable gun when no field exists.
+     */
+    private static void collectFacadesFromSource(Class&lt;?&gt; consumer, Set&lt;Class&lt;?&gt;&gt; out) {
+        Optional&lt;CompilationUnit&gt; cu = parseSource(consumer);
+        if (cu.isEmpty()) {
+            return;
+        }
+        String pkg = consumer.getPackageName();
+        for (MethodCallExpr call : cu.get().findAll(MethodCallExpr.class)) {
+            if (call.getScope().isEmpty()) {
+                continue;
+            }
+            Class&lt;?&gt; resolved = null;
+            if (call.getScope().get() instanceof NameExpr ne) {
+                String scope = ne.getNameAsString();
+                if (!scope.isEmpty() &amp;&amp; Character.isUpperCase(scope.charAt(0))) {
+                    resolved = resolveSimple(cu.get(), pkg, scope);
+                }
+            } else if (call.getScope().get() instanceof com.github.javaparser.ast.expr.FieldAccessExpr fae) {
+                resolved = tryLoad(fae.toString());   // fully-qualified accessor call, no import needed
+            }
+            if (resolved == null || resolved == consumer || !isProjectClass(resolved)) {
+                continue;
+            }
+            Facade facade = asFacade(resolved);
+            if (facade != null &amp;&amp; facade.accessor().getName().equals(call.getNameAsString())) {
+                out.add(resolved);
+            }
+        }
+        for (com.github.javaparser.ast.body.VariableDeclarator var
+                : cu.get().findAll(com.github.javaparser.ast.body.VariableDeclarator.class)) {
+            String typeName = var.getType().asString().replaceAll(&quot;&lt;.*&gt;&quot;, &quot;&quot;).trim();
+            Class&lt;?&gt; resolved = typeName.contains(&quot;.&quot;) ? tryLoad(typeName)
+                    : resolveSimple(cu.get(), pkg, typeName);
+            if (resolved != null &amp;&amp; resolved != consumer &amp;&amp; isProjectClass(resolved)
+                    &amp;&amp; asFacade(resolved) != null) {
+                out.add(resolved);
+            }
+        }
+    }
+
+    /**
+     * TWEAK-POINT (detection): facade types arriving through SIGNATURES — constructor params,
+     * method params, and return types (reflection; no source needed).
+     */
+    private static void collectFacadesFromSignatures(Class&lt;?&gt; consumer, Set&lt;Class&lt;?&gt;&gt; out) {
+        java.util.List&lt;Class&lt;?&gt;&gt; candidates = new ArrayList&lt;&gt;();
+        for (var ctor : consumer.getDeclaredConstructors()) {
+            candidates.addAll(java.util.Arrays.asList(ctor.getParameterTypes()));
+        }
+        for (Method m : consumer.getDeclaredMethods()) {
+            candidates.addAll(java.util.Arrays.asList(m.getParameterTypes()));
+            candidates.add(m.getReturnType());
+        }
+        for (Class&lt;?&gt; c : candidates) {
+            Class&lt;?&gt; base = baseType(c);
+            if (base != consumer &amp;&amp; isProjectClass(base) &amp;&amp; asFacade(base) != null) {
+                out.add(base);
+            }
+        }
+    }
+
+
+    /**
+     * Facade shape test. Returns the facade model, or null when the class does not qualify or
+     * its accessor takes parameters the fixture cannot synthesize (Class/String only).
+     */
+    private static Facade asFacade(Class&lt;?&gt; candidate) {
+        if (candidate == null || !isProjectClass(candidate)) {
+            return null;
+        }
+        Method accessor = singletonAccessor(candidate);
+        if (accessor == null) {
+            return null;
+        }
+        if (!hasSelfTypedHolder(candidate)) {
+            return null;   // D4: factory shape (fresh object per call) - swapping it is a no-op
+        }
+        List&lt;DelegateField&gt; delegates = swappableDelegates(candidate);
+        if (delegates.isEmpty()) {
+            if (hasFrozenDelegates(candidate)) {
+                System.out.println(&quot;NOTE facade-like but frozen (static-final delegates only), &quot;
+                        + &quot;unsupported: &quot; + candidate.getName());
+            }
+            return null;
+        }
+        return new Facade(candidate, accessor, delegates);
+    }
+
+    /** Public static method returning the class itself, with only synthesizable params. */
+    private static Method singletonAccessor(Class&lt;?&gt; candidate) {
+        for (Method m : candidate.getDeclaredMethods()) {
+            if (!Modifier.isStatic(m.getModifiers()) || !Modifier.isPublic(m.getModifiers())
+                    || m.isSynthetic() || m.getReturnType() != candidate) {
+                continue;
+            }
+            boolean synthesizable = true;
+            for (Class&lt;?&gt; p : m.getParameterTypes()) {
+                if (p != Class.class &amp;&amp; p != String.class) {
+                    synthesizable = false;
+                }
+            }
+            if (synthesizable) {
+                return m;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Swappable delegates: reference-typed mutable state the play controls. Static-final is
+     * frozen (unswappable); value-shaped types (primitive/boxed/String/enum) are config data,
+     * not delegates; the self-typed INSTANCE field is the singleton itself.
+     */
+    private static List&lt;DelegateField&gt; swappableDelegates(Class&lt;?&gt; candidate) {
+        List&lt;DelegateField&gt; out = new ArrayList&lt;&gt;();
+        for (Field f : candidate.getDeclaredFields()) {
+            if (f.isSynthetic()) {
+                continue;
+            }
+            boolean statik = Modifier.isStatic(f.getModifiers());
+            if (statik &amp;&amp; Modifier.isFinal(f.getModifiers())) {
+                continue;
+            }
+            Class&lt;?&gt; ft = f.getType();
+            if (ft == candidate || ft.isPrimitive() || ft.isEnum() || isValueShaped(ft)) {
+                continue;
+            }
+            if (ft == Class.class) {
+                continue;   // D3: Mockito cannot mock java.lang.Class - not a swappable delegate
+            }
+            out.add(new DelegateField(f.getName(), ft, statik, java.util.Map.class.isAssignableFrom(ft)));
+        }
+        return out;
+    }
+
+
+    /** D4 guard: a real singleton holds itself in a static field; factories do not. */
+    private static boolean hasSelfTypedHolder(Class&lt;?&gt; candidate) {
+        for (Field f : candidate.getDeclaredFields()) {
+            if (Modifier.isStatic(f.getModifiers()) &amp;&amp; f.getType() == candidate) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** D5 visibility: reference-typed static-final state exists but is frozen by contract. */
+    private static boolean hasFrozenDelegates(Class&lt;?&gt; candidate) {
+        for (Field f : candidate.getDeclaredFields()) {
+            if (Modifier.isStatic(f.getModifiers()) &amp;&amp; Modifier.isFinal(f.getModifiers())
+                    &amp;&amp; !f.getType().isPrimitive() &amp;&amp; f.getType() != candidate
+                    &amp;&amp; !f.isSynthetic()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isValueShaped(Class&lt;?&gt; type) {
+        return type == String.class || type == Integer.class || type == Long.class
+                || type == Double.class || type == Float.class || type == Short.class
+                || type == Byte.class || type == Boolean.class || type == Character.class;
+    }
+
+    /** Project class iff its .java source exists under the main source root. */
+    private static boolean isProjectClass(Class&lt;?&gt; type) {
+        if (type == null || type.isPrimitive()
+                || type.getPackageName().startsWith(&quot;java.&quot;)
+                || type.getPackageName().startsWith(&quot;javax.&quot;)) {
+            return false;
+        }
+        return Files.isRegularFile(sourcePath(type));
+    }
+
+    private static Path sourcePath(Class&lt;?&gt; type) {
+        Class&lt;?&gt; outer = type;
+        while (outer.getEnclosingClass() != null) {
+            outer = outer.getEnclosingClass();
+        }
+        return Config.mainSourceRoot()
+                .resolve(outer.getPackageName().replace(&#x27;.&#x27;, &#x27;/&#x27;))
+                .resolve(outer.getSimpleName() + &quot;.java&quot;);
+    }
+
+    private static Optional&lt;CompilationUnit&gt; parseSource(Class&lt;?&gt; type) {
+        Path src = sourcePath(type);
+        if (!Files.isRegularFile(src)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(StaticJavaParser.parse(src));
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    private static Class&lt;?&gt; resolveSimple(CompilationUnit cu, String pkg, String simple) {
+        for (ImportDeclaration imp : cu.getImports()) {
+            if (!imp.isAsterisk() &amp;&amp; !imp.isStatic() &amp;&amp; imp.getNameAsString().endsWith(&quot;.&quot; + simple)) {
+                Class&lt;?&gt; c = tryLoad(imp.getNameAsString());
+                if (c != null) {
+                    return c;
+                }
+            }
+        }
+        return tryLoad(pkg + &quot;.&quot; + simple);
+    }
+
+    private static Class&lt;?&gt; tryLoad(String fqcn) {
+        try {
+            return Class.forName(fqcn, false, SMCFixtureScanner.class.getClassLoader());
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static Class&lt;?&gt; baseType(Class&lt;?&gt; type) {
+        Class&lt;?&gt; cur = type;
+        while (cur != null &amp;&amp; cur.isArray()) {
+            cur = cur.getComponentType();
+        }
+        return cur;
+    }
+}
+</pre>
+<h4>fixtures/FixtureGenerator.java</h4>
+<pre>package com.testgen.fixtures;
+
+import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.CodeBlock;
+import com.squareup.javapoet.FieldSpec;
+import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.MethodSpec;
+import com.squareup.javapoet.ParameterizedTypeName;
+import com.squareup.javapoet.TypeSpec;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import javax.lang.model.element.Modifier;
+
+/**
+ * TG-BOILERDET emission pass, fixture half: writes one testsupport fixture per detected facade,
+ * shaped like the lab&#x27;s LoggerFixture/ConfigFixture (delegate swap in install, mandatory restore
+ * in tearDown). Reflection stays INSIDE the fixture so emitted test code carries none, and no
+ * mockStatic of the facade ever exists — the delegate swap cannot collide.
+ *
+ * Skips emission when the target project already has a fixture of the same name.
+ */
+public final class FixtureGenerator {
+
+    static final String FIXTURE_PACKAGE = &quot;testsupport&quot;;
+
+    private static final ClassName MOCKITO = ClassName.get(&quot;org.mockito&quot;, &quot;Mockito&quot;);
+    private static final ClassName REFLECT_FIELD = ClassName.get(&quot;java.lang.reflect&quot;, &quot;Field&quot;);
+    private static final ClassName LINKED_MAP = ClassName.get(&quot;java.util&quot;, &quot;LinkedHashMap&quot;);
+    private static final ClassName MAP = ClassName.get(&quot;java.util&quot;, &quot;Map&quot;);
+
+    private FixtureGenerator() {}
+
+    public static String fixtureSimpleName(SMCFixtureScanner.Facade facade) {
+        return facade.facadeClass().getSimpleName() + &quot;Fixture&quot;;
+    }
+
+    /** Writes the fixture unless one already exists; returns its ClassName either way. */
+    public static ClassName write(SMCFixtureScanner.Facade facade, Path testSourceRoot) throws Exception {
+        String simpleName = fixtureSimpleName(facade);
+        ClassName fixtureName = ClassName.get(FIXTURE_PACKAGE, simpleName);
+        Path target = testSourceRoot.resolve(FIXTURE_PACKAGE).resolve(simpleName + &quot;.java&quot;);
+        if (Files.exists(target)) {
+            System.out.println(&quot;SKIP fixture (exists): &quot; + target);
+            return fixtureName;
+        }
+
+        JavaFile.builder(FIXTURE_PACKAGE,
+                        buildType(facade, simpleName).addModifiers(Modifier.PUBLIC).build())
+                .skipJavaLangImports(true)
+                .addFileComment(&quot;AUTO-GENERATED by testgen FixtureGenerator (TG-BOILERDET)&quot;)
+                .build()
+                .writeTo(testSourceRoot);
+        System.out.println(&quot;Wrote &quot; + FIXTURE_PACKAGE + &quot;.&quot; + simpleName);
+        return fixtureName;
+    }
+
+    /**
+     * Inline mode (BOILERPLATE_INLINE): the SAME fixture as a private static nested class of the
+     * test class - self-contained file, no shared testsupport code.
+     */
+    public static TypeSpec nestedType(SMCFixtureScanner.Facade facade) {
+        return buildType(facade, fixtureSimpleName(facade))
+                .addModifiers(Modifier.PRIVATE, Modifier.STATIC)
+                .build();
+    }
+
+    private static TypeSpec.Builder buildType(SMCFixtureScanner.Facade facade, String simpleName) {
+        TypeSpec.Builder fixture = TypeSpec.classBuilder(simpleName)
+                .addModifiers(Modifier.FINAL)   // visibility added by each emission mode
+                .addJavadoc(&quot;AUTO-GENERATED delegate-swap fixture for $L.\n&quot;
+                                + &quot;Lab play: swap the singleton&#x27;s delegates, restore in tearDown — no mockStatic.\n&quot;
+                                + &quot;Reflection is contained here so the test class carries none.\n&quot;,
+                        facade.facadeClass().getName());
+
+        fixture.addField(FieldSpec.builder(
+                        ParameterizedTypeName.get(MAP, ClassName.get(String.class), ClassName.get(Object.class)),
+                        &quot;originals&quot;, Modifier.PRIVATE, Modifier.FINAL)
+                .initializer(&quot;new $T&lt;&gt;()&quot;, LINKED_MAP)
+                .build());
+
+        for (SMCFixtureScanner.DelegateField d : facade.delegates()) {
+            fixture.addField(FieldSpec.builder(handleType(d), handleName(d), Modifier.PRIVATE).build());
+            fixture.addMethod(MethodSpec.methodBuilder(handleName(d))
+                    .addModifiers(Modifier.PUBLIC)
+                    .returns(handleType(d))
+                    .addStatement(&quot;return $L&quot;, handleName(d))
+                    .build());
+        }
+
+        fixture.addMethod(installMethod(facade));
+        fixture.addMethod(restoreMethod(facade));
+        return fixture;
+    }
+
+    /** install(): capture each original delegate, swap in the test double. */
+    private static MethodSpec installMethod(SMCFixtureScanner.Facade facade) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(&quot;install&quot;)
+                .addModifiers(Modifier.PUBLIC)
+                .addException(Exception.class)
+                .addJavadoc(&quot;Swaps every delegate for a test double; restore() afterwards is mandatory.\n&quot;);
+
+        ClassName facadeName = ClassName.get(facade.facadeClass());
+        if (facade.needsInstance()) {
+            b.addStatement(&quot;$T target = $T.$L($L)&quot;, facadeName, facadeName,
+                    facade.accessor().getName(), accessorArgs(facade));
+        }
+        for (SMCFixtureScanner.DelegateField d : facade.delegates()) {
+            String fieldVar = d.name() + &quot;Field&quot;;
+            b.addStatement(&quot;$T $L = $T.class.getDeclaredField($S)&quot;,
+                    REFLECT_FIELD, fieldVar, facadeName, d.name());
+            b.addStatement(&quot;$L.setAccessible(true)&quot;, fieldVar);
+            b.addStatement(&quot;originals.put($S, $L.get($L))&quot;, d.name(), fieldVar, targetOf(d));
+            if (d.mapShaped()) {
+                b.addStatement(&quot;$L = new $T&lt;&gt;(($T&lt;?, ?&gt;) originals.get($S))&quot;,
+                        handleName(d), LINKED_MAP, MAP, d.name());
+                for (String key : seededKeys(facade)) {
+                    b.addStatement(&quot;$L.put($S, $S)&quot;, handleName(d), key,
+                            com.config.Config.SEEDED_PLACEHOLDER_VALUE);
+                }
+            } else if (seedable(d)) {
+                b.addStatement(&quot;$L = new $T()&quot;, handleName(d), rawType(d));
+                for (String key : seededKeys(facade)) {
+                    b.addStatement(&quot;$L.setProperty($S, $S)&quot;, handleName(d), key,
+                            com.config.Config.SEEDED_PLACEHOLDER_VALUE);
+                }
+            } else {
+                b.addStatement(&quot;$L = $T.mock($T.class)&quot;, handleName(d), MOCKITO, rawType(d));
+            }
+            b.addStatement(&quot;$L.set($L, $L)&quot;, fieldVar, targetOf(d), handleName(d));
+        }
+        return b.build();
+    }
+
+    /** restore(): put every original back — the delegates are JVM-global state. */
+    private static MethodSpec restoreMethod(SMCFixtureScanner.Facade facade) {
+        MethodSpec.Builder b = MethodSpec.methodBuilder(&quot;restore&quot;)
+                .addModifiers(Modifier.PUBLIC)
+                .addException(Exception.class);
+
+        ClassName facadeName = ClassName.get(facade.facadeClass());
+        if (facade.needsInstance()) {
+            b.addStatement(&quot;$T target = $T.$L($L)&quot;, facadeName, facadeName,
+                    facade.accessor().getName(), accessorArgs(facade));
+        }
+        for (SMCFixtureScanner.DelegateField d : facade.delegates()) {
+            String fieldVar = d.name() + &quot;Field&quot;;
+            b.beginControlFlow(&quot;if (originals.containsKey($S))&quot;, d.name());
+            b.addStatement(&quot;$T $L = $T.class.getDeclaredField($S)&quot;,
+                    REFLECT_FIELD, fieldVar, facadeName, d.name());
+            b.addStatement(&quot;$L.setAccessible(true)&quot;, fieldVar);
+            b.addStatement(&quot;$L.set($L, originals.get($S))&quot;, fieldVar, targetOf(d), d.name());
+            b.endControlFlow();
+        }
+        return b.build();
+    }
+
+    /** Map delegates keep their runtime shape via a live LinkedHashMap copy; others get a mock. */
+    private static com.squareup.javapoet.TypeName handleType(SMCFixtureScanner.DelegateField d) {
+        if (d.mapShaped()) {
+            return ParameterizedTypeName.get(LINKED_MAP,
+                    ClassName.get(Object.class), ClassName.get(Object.class));
+        }
+        return ClassName.get(d.type());
+    }
+
+    private static ClassName rawType(SMCFixtureScanner.DelegateField d) {
+        return ClassName.get(d.type());
+    }
+
+    private static String handleName(SMCFixtureScanner.DelegateField d) {
+        return d.name() + (d.mapShaped() ? &quot;Values&quot; : &quot;Mock&quot;);
+    }
+
+    private static String targetOf(SMCFixtureScanner.DelegateField d) {
+        return d.staticField() ? &quot;null&quot; : &quot;target&quot;;
+    }
+
+    /** Class params get the fixture&#x27;s own class literal; String params a fixed token. */
+    private static CodeBlock accessorArgs(SMCFixtureScanner.Facade facade) {
+        CodeBlock.Builder args = CodeBlock.builder();
+        boolean first = true;
+        for (Class&lt;?&gt; p : facade.accessor().getParameterTypes()) {
+            if (!first) {
+                args.add(&quot;, &quot;);
+            }
+            first = false;
+            if (p == Class.class) {
+                args.add(&quot;$L.class&quot;, fixtureSimpleName(facade));
+            } else {
+                args.add(&quot;$S&quot;, &quot;testgen&quot;);
+            }
+        }
+        return args.build();
+    }
+
+    /**
+     * TWEAK-POINT (CONFIG_PAYLOAD=SEEDED): a delegate is seedable when it has a public no-arg
+     * constructor and a setProperty(String, Object) seam. Anything else falls back to a mock.
+     */
+    private static boolean seedable(SMCFixtureScanner.DelegateField d) {
+        if (!&quot;SEEDED&quot;.equals(com.config.Config.CONFIG_PAYLOAD)) {
+            return false;
+        }
+        try {
+            d.type().getConstructor();
+            d.type().getMethod(&quot;setProperty&quot;, String.class, Object.class);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * TWEAK-POINT (CONFIG_PAYLOAD=SEEDED): key discovery. Scans every main-source file for string
+     * literals on lines that mention the facade&#x27;s simple name or its accessor, keeping literals
+     * that look like config keys (dotted or underscored, no spaces). Over-collection is harmless -
+     * an extra key just carries the placeholder value.
+     */
+    private static java.util.List&lt;String&gt; seededKeys(SMCFixtureScanner.Facade facade) {
+        if (!&quot;SEEDED&quot;.equals(com.config.Config.CONFIG_PAYLOAD)) {
+            return java.util.List.of();
+        }
+        java.util.regex.Pattern literal = java.util.regex.Pattern.compile(&quot;\&quot;([A-Za-z0-9_.]*[._][A-Za-z0-9_.]*)\&quot;&quot;);
+        java.util.LinkedHashSet&lt;String&gt; keys = new java.util.LinkedHashSet&lt;&gt;();
+        String simple = facade.facadeClass().getSimpleName();
+        String accessor = facade.accessor().getName();
+        try (var files = java.nio.file.Files.walk(com.config.Config.mainSourceRoot())) {
+            for (java.nio.file.Path p : files.filter(f -&gt; f.toString().endsWith(&quot;.java&quot;)).toList()) {
+                for (String line : java.nio.file.Files.readAllLines(p)) {
+                    if (!line.contains(simple) &amp;&amp; !line.contains(accessor + &quot;(&quot;)) {
+                        continue;
+                    }
+                    java.util.regex.Matcher m = literal.matcher(line);
+                    while (m.find()) {
+                        keys.add(m.group(1));
+                    }
+                }
+            }
+        } catch (Throwable ignored) { }
+        return new java.util.ArrayList&lt;&gt;(keys);
+    }
+}
+</pre>
+<h4>fixtures/retrofit/InjectSMCFixture.java</h4>
+<pre>package com.testgen.fixtures.retrofit;
+
+import com.testgen.fixtures.FixtureGenerator;
+import com.testgen.fixtures.SMCFixtureScanner;
+
+import com.config.Config;
+import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.TypeSpec;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+/**
+ * Adds the facade protection (install/restore + fixture) to EXISTING test classes that the
+ * generator did not produce. Deterministic and anchor-based: when an expected anchor is missing
+ * the file is reported and SKIPPED, never guessed at or corrupted.
+ *
+ * Honours the same switches as generation:
+ *   Config.FIXTURE_PLACEMENT  &quot;SHARED&quot; = testsupport fixture files + thin calls
+ *                             &quot;NESTED&quot; = fixture embedded privately in each injected file
+ *   Config.CONFIG_PAYLOAD     &quot;MOCK&quot; | &quot;SEEDED&quot; (see FixtureGenerator)
+ *
+ * Run from the module root (IntelliJ Run works): reads testgen/classes.txt like the Runner.
+ */
+public final class InjectSMCFixture {
+
+    private InjectSMCFixture() {}
+
+    public static void main(String[] args) throws Exception {
+        for (String fqcn : Config.readClasses()) {
+            Class&lt;?&gt; sut = Class.forName(fqcn.trim());
+            List&lt;SMCFixtureScanner.Facade&gt; facades = SMCFixtureScanner.detect(sut);
+            if (facades.isEmpty()) {
+                System.out.println(&quot;SKIP (no facade detected): &quot; + fqcn);
+                continue;
+            }
+            Path testFile = Config.testSourceRoot()
+                    .resolve(sut.getPackageName().replace(&#x27;.&#x27;, &#x27;/&#x27;))
+                    .resolve(sut.getSimpleName() + Config.TEST_NAME_SUFFIX + &quot;.java&quot;);
+            if (!Files.isRegularFile(testFile)) {
+                System.out.println(&quot;SKIP (no existing test file): &quot; + testFile);
+                continue;
+            }
+            String source = Files.readString(testFile);
+            if (source.contains(&quot;Fixture&quot;)) {
+                System.out.println(&quot;SKIP (already protected): &quot; + testFile);
+                continue;
+            }
+            String injected = inject(source, sut, facades, testFile);
+            if (injected == null) {
+                continue;   // anchor missing - reported inside inject()
+            }
+            Files.writeString(testFile, injected);
+            System.out.println(&quot;INJECTED &quot; + facades.size() + &quot; fixture(s): &quot; + testFile);
+        }
+    }
+
+    /**
+     * TWEAK-POINT (injection anchors): the class-body anchor is the first &quot;class &lt;TestName&gt; {&quot;
+     * line; setup/tearDown anchors are &quot;void setup()&quot; / &quot;void tearDown()&quot; if present, else both
+     * methods are created after the fixture fields.
+     */
+    private static String inject(String source, Class&lt;?&gt; sut,
+            List&lt;SMCFixtureScanner.Facade&gt; facades, Path testFile) throws Exception {
+        String testName = sut.getSimpleName() + Config.TEST_NAME_SUFFIX;
+        String classAnchor = &quot;class &quot; + testName + &quot; {&quot;;
+        int classIdx = source.indexOf(classAnchor);
+        if (classIdx &lt; 0) {
+            System.out.println(&quot;SKIP (class anchor missing): &quot; + testFile);
+            return null;
+        }
+        int bodyStart = classIdx + classAnchor.length();
+
+        StringBuilder fields = new StringBuilder();
+        StringBuilder installs = new StringBuilder();
+        StringBuilder restores = new StringBuilder();
+        StringBuilder nestedTypes = new StringBuilder();
+        StringBuilder imports = new StringBuilder();
+
+        for (SMCFixtureScanner.Facade facade : facades) {
+            String simple = FixtureGenerator.fixtureSimpleName(facade);
+            String var = Character.toLowerCase(simple.charAt(0)) + simple.substring(1);
+            fields.append(&quot;\n    private final &quot;).append(simple).append(&#x27; &#x27;).append(var)
+                    .append(&quot; = new &quot;).append(simple).append(&quot;();\n&quot;);
+            installs.append(&quot;        &quot;).append(var).append(&quot;.install();\n&quot;);
+            restores.insert(0, &quot;        &quot; + var + &quot;.restore();\n&quot;);
+            if (&quot;NESTED&quot;.equals(Config.FIXTURE_PLACEMENT)) {
+                String rendered = renderedNested(facade);
+                nestedTypes.append(&#x27;\n&#x27;).append(indent(classOf(rendered))).append(&#x27;\n&#x27;);
+                imports.append(importsOf(rendered));
+            } else {
+                FixtureGenerator.write(facade, Config.testSourceRoot());
+                imports.append(&quot;import testsupport.&quot;).append(simple).append(&quot;;\n&quot;);
+            }
+        }
+
+        String out = source;
+        if (imports.length() &gt; 0) {
+            int pkgEnd = out.indexOf(&#x27;;&#x27;, out.indexOf(&quot;package &quot;)) + 1;
+            out = out.substring(0, pkgEnd) + &quot;\n\n&quot; + imports + out.substring(pkgEnd);
+            bodyStart = out.indexOf(classAnchor) + classAnchor.length();
+        }
+
+        boolean hasSetup = out.contains(&quot;void setup()&quot;);
+        boolean hasTearDown = out.contains(&quot;void tearDown()&quot;);
+        String lifecycle = &quot;&quot;;
+        if (!hasSetup) {
+            lifecycle += &quot;\n    @org.junit.jupiter.api.BeforeEach\n    void setup() throws Exception {\n&quot;
+                    + installs + &quot;    }\n&quot;;
+        }
+        if (!hasTearDown) {
+            lifecycle += &quot;\n    @org.junit.jupiter.api.AfterEach\n    void tearDown() throws Exception {\n&quot;
+                    + restores + &quot;    }\n&quot;;
+        }
+        out = out.substring(0, bodyStart) + fields + lifecycle + out.substring(bodyStart);
+
+        if (hasSetup) {
+            out = insertAtMethodStart(out, &quot;void setup()&quot;, installs.toString(), testFile);
+            if (out == null) {
+                return null;
+            }
+        }
+        if (hasTearDown) {
+            out = insertAtMethodStart(out, &quot;void tearDown()&quot;, restores.toString(), testFile);
+            if (out == null) {
+                return null;
+            }
+        }
+
+        if (nestedTypes.length() &gt; 0) {
+            int lastBrace = out.lastIndexOf(&#x27;}&#x27;);
+            out = out.substring(0, lastBrace) + nestedTypes + &quot;}\n&quot;;
+        }
+        return out;
+    }
+
+    private static String insertAtMethodStart(String source, String signature, String lines,
+            Path testFile) {
+        int idx = source.indexOf(signature);
+        int brace = source.indexOf(&#x27;{&#x27;, idx);
+        if (idx &lt; 0 || brace &lt; 0) {
+            System.out.println(&quot;SKIP (lifecycle anchor missing &#x27;&quot; + signature + &quot;&#x27;): &quot; + testFile);
+            return null;
+        }
+        return source.substring(0, brace + 1) + &quot;\n&quot; + lines + source.substring(brace + 1);
+    }
+
+    /** The nested fixture rendered as a full compilation unit (imports + class). */
+    private static String renderedNested(SMCFixtureScanner.Facade facade) {
+        TypeSpec type = FixtureGenerator.nestedType(facade);
+        return JavaFile.builder(&quot;injected&quot;, type).skipJavaLangImports(true).build().toString();
+    }
+
+    private static String classOf(String rendered) {
+        return rendered.substring(rendered.indexOf(&quot;private static final class&quot;));
+    }
+
+    /** The fixture&#x27;s own import lines, so the host file compiles without JavaPoet&#x27;s help. */
+    private static String importsOf(String rendered) {
+        StringBuilder out = new StringBuilder();
+        for (String line : rendered.split(&quot;\n&quot;)) {
+            if (line.startsWith(&quot;import &quot;)) {
+                out.append(line).append(&#x27;\n&#x27;);
+            }
+        }
+        return out.toString();
+    }
+
+    private static String indent(String block) {
+        StringBuilder out = new StringBuilder();
+        for (String line : block.split(&quot;\n&quot;)) {
+            out.append(line.isBlank() ? &quot;&quot; : &quot;    &quot; + line).append(&#x27;\n&#x27;);
+        }
+        return out.toString();
+    }
+}
+</pre>
+<h4>fixtures/retrofit/SwitchSMCFixture.java</h4>
+<pre>package com.testgen.fixtures.retrofit;
+
+import com.testgen.fixtures.FixtureGenerator;
+import com.testgen.fixtures.SMCFixtureScanner;
+
+import com.config.Config;
+import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.TypeSpec;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+/**
+ * Flips EXISTING generated tests between fixture placements for the logger/config fixtures.
+ *
+ * SHARED -&gt; NESTED: drops the testsupport import and embeds the rendered fixture as a private
+ * nested class. NESTED -&gt; SHARED: writes the testsupport fixture (skip-if-exists), removes the
+ * nested class, adds the import. Fixture fields and setup()/tearDown() lines are placement-
+ * independent and are never touched.
+ *
+ * Real-world hardening (defects D1/D2 from the greenmail leg): merged imports are filtered
+ * (java.lang and host-package never enter), imports left unused after a flip are dropped, and
+ * blank runs are capped so repeated flips cannot grow the file.
+ *
+ * Anchor-based and skip-not-corrupt: an unexpected file is reported and left alone. Idempotent:
+ * a file already in the target placement is a SKIP.
+ *
+ * Usage: run main with optional arg SHARED|NESTED; no arg = Config.FIXTURE_PLACEMENT.
+ */
+public final class SwitchSMCFixture {
+
+    private SwitchSMCFixture() {}
+
+    public static void main(String[] args) throws Exception {
+        String target = args.length &gt; 0 ? args[0].toUpperCase() : Config.FIXTURE_PLACEMENT;
+        if (!target.equals(&quot;SHARED&quot;) &amp;&amp; !target.equals(&quot;NESTED&quot;)) {
+            throw new IllegalArgumentException(&quot;target must be SHARED or NESTED, got: &quot; + target);
+        }
+
+        for (String fqcn : Config.readClasses()) {
+            Class&lt;?&gt; sut = Class.forName(fqcn.trim());
+            List&lt;SMCFixtureScanner.Facade&gt; facades = SMCFixtureScanner.detect(sut);
+            if (facades.isEmpty()) {
+                System.out.println(&quot;SKIP (no facade detected): &quot; + fqcn);
+                continue;
+            }
+
+            Path testFile = Config.testSourceRoot()
+                    .resolve(sut.getPackageName().replace(&#x27;.&#x27;, &#x27;/&#x27;))
+                    .resolve(sut.getSimpleName() + Config.TEST_NAME_SUFFIX + &quot;.java&quot;);
+            if (!Files.isRegularFile(testFile)) {
+                System.out.println(&quot;SKIP (no existing test file): &quot; + testFile);
+                continue;
+            }
+
+            migrate(testFile, facades, target);
+        }
+    }
+
+    /** Migrates one test file to the target placement; counts per-facade outcomes. */
+    private static void migrate(Path testFile, List&lt;SMCFixtureScanner.Facade&gt; facades,
+            String target) throws Exception {
+        String source = Files.readString(testFile);
+        int changed = 0;
+
+        for (SMCFixtureScanner.Facade facade : facades) {
+            String simple = FixtureGenerator.fixtureSimpleName(facade);
+            boolean nestedHere = source.contains(&quot;private static final class &quot; + simple);
+            boolean sharedHere = source.contains(&quot;import testsupport.&quot; + simple + &quot;;&quot;);
+
+            if (target.equals(&quot;NESTED&quot;) &amp;&amp; sharedHere &amp;&amp; !nestedHere) {
+                source = toNested(source, facade, simple, testFile);
+                if (source == null) {
+                    return;
+                }
+                changed++;
+            } else if (target.equals(&quot;SHARED&quot;) &amp;&amp; nestedHere) {
+                source = toShared(source, facade, simple, testFile);
+                if (source == null) {
+                    return;
+                }
+                changed++;
+            }
+        }
+
+        if (changed == 0) {
+            System.out.println(&quot;SKIP (already &quot; + target + &quot;): &quot; + testFile);
+            return;
+        }
+        Files.writeString(testFile, capBlankRuns(source));
+        System.out.println(&quot;MIGRATED &quot; + changed + &quot; fixture(s) -&gt; &quot; + target + &quot;: &quot; + testFile);
+    }
+
+    /** SHARED -&gt; NESTED: remove the import, embed the rendered fixture before the final brace. */
+    private static String toNested(String source, SMCFixtureScanner.Facade facade,
+            String simple, Path testFile) {
+        String importLine = &quot;import testsupport.&quot; + simple + &quot;;&quot;;
+        int importIdx = source.indexOf(importLine);
+        int lastBrace = source.lastIndexOf(&#x27;}&#x27;);
+        if (importIdx &lt; 0 || lastBrace &lt; 0) {
+            System.out.println(&quot;SKIP (anchor missing for &quot; + simple + &quot;): &quot; + testFile);
+            return null;
+        }
+
+        String rendered = renderNested(facade);
+        String out = source.replace(importLine + &quot;\n&quot;, &quot;&quot;).replace(importLine, &quot;&quot;);
+        out = mergeImports(out, fixtureImports(rendered, hostPackage(out)), testFile);
+        if (out == null) {
+            return null;
+        }
+
+        lastBrace = out.lastIndexOf(&#x27;}&#x27;);
+        return out.substring(0, lastBrace) + &quot;\n&quot; + indent(classOf(rendered)) + &quot;}\n&quot;;
+    }
+
+    /** NESTED -&gt; SHARED: write the testsupport fixture, cut the nested block, add the import. */
+    private static String toShared(String source, SMCFixtureScanner.Facade facade,
+            String simple, Path testFile) throws Exception {
+        String anchor = &quot;private static final class &quot; + simple;
+        int start = source.indexOf(anchor);
+        int open = source.indexOf(&#x27;{&#x27;, start);
+        if (start &lt; 0 || open &lt; 0) {
+            System.out.println(&quot;SKIP (nested anchor missing for &quot; + simple + &quot;): &quot; + testFile);
+            return null;
+        }
+
+        int depth = 0;
+        int end = -1;
+        for (int i = open; i &lt; source.length(); i++) {
+            char c = source.charAt(i);
+            if (c == &#x27;{&#x27;) {
+                depth++;
+            } else if (c == &#x27;}&#x27;) {
+                depth--;
+                if (depth == 0) {
+                    end = i + 1;
+                    break;
+                }
+            }
+        }
+        if (end &lt; 0) {
+            System.out.println(&quot;SKIP (unbalanced braces in &quot; + simple + &quot;): &quot; + testFile);
+            return null;
+        }
+
+        FixtureGenerator.write(facade, Config.testSourceRoot());
+
+        int lineStart = source.lastIndexOf(&#x27;\n&#x27;, start) + 1;
+        String out = source.substring(0, lineStart) + source.substring(end);
+        out = mergeImports(out, &quot;import testsupport.&quot; + simple + &quot;;\n&quot;, testFile);
+        if (out == null) {
+            return null;
+        }
+        return dropUnusedImports(out);
+    }
+
+    /** Inserts import lines (deduplicated) after the package statement. */
+    private static String mergeImports(String source, String imports, Path testFile) {
+        int pkgIdx = source.indexOf(&quot;package &quot;);
+        int pkgEnd = source.indexOf(&#x27;;&#x27;, pkgIdx);
+        if (pkgIdx &lt; 0 || pkgEnd &lt; 0) {
+            System.out.println(&quot;SKIP (package anchor missing): &quot; + testFile);
+            return null;
+        }
+
+        StringBuilder fresh = new StringBuilder();
+        for (String line : imports.split(&quot;\n&quot;)) {
+            if (!line.isBlank() &amp;&amp; !source.contains(line.trim())) {
+                fresh.append(line.trim()).append(&#x27;\n&#x27;);
+            }
+        }
+        if (fresh.length() == 0) {
+            return source;
+        }
+
+        if (source.indexOf(&quot;\nimport &quot;) &lt; 0) {
+            return source.substring(0, pkgEnd + 1) + &quot;\n\n&quot; + fresh + source.substring(pkgEnd + 1);
+        }
+        for (String add : fresh.toString().split(&quot;\n&quot;)) {
+            int insertAt = sortedInsertPoint(source, add);
+            source = source.substring(0, insertAt) + add + &quot;\n&quot; + source.substring(insertAt);
+        }
+        return source;
+    }
+
+
+    /** R3: position keeping the import block alphabetically ordered. */
+    private static int sortedInsertPoint(String source, String importLine) {
+        int idx = source.indexOf(&quot;\nimport &quot;);
+        int insertAt = -1;
+        int lastEnd = -1;
+        while (idx &gt;= 0) {
+            int lineEnd = source.indexOf(&#x27;\n&#x27;, idx + 1);
+            String existing = source.substring(idx + 1, lineEnd);
+            if (insertAt &lt; 0 &amp;&amp; existing.compareTo(importLine) &gt; 0) {
+                insertAt = idx + 1;
+            }
+            lastEnd = lineEnd + 1;
+            idx = source.indexOf(&quot;\nimport &quot;, idx + 1);
+        }
+        return insertAt &gt;= 0 ? insertAt : lastEnd;
+    }
+
+    /** D1: the fixture&#x27;s import lines, filtered - java.lang and the host package never enter. */
+    private static String fixtureImports(String rendered, String hostPackage) {
+        StringBuilder out = new StringBuilder();
+        for (String line : rendered.split(&quot;\n&quot;)) {
+            if (!line.startsWith(&quot;import &quot;)) {
+                continue;
+            }
+            String fqcn = line.substring(7).replace(&quot;;&quot;, &quot;&quot;).trim();
+            String pkg = fqcn.contains(&quot;.&quot;) ? fqcn.substring(0, fqcn.lastIndexOf(&#x27;.&#x27;)) : &quot;&quot;;
+            if (pkg.equals(&quot;java.lang&quot;) || pkg.equals(hostPackage)) {
+                continue;
+            }
+            out.append(line).append(&#x27;\n&#x27;);
+        }
+        return out.toString();
+    }
+
+    /** The host file&#x27;s own package, for import filtering. */
+    private static String hostPackage(String source) {
+        int idx = source.indexOf(&quot;package &quot;);
+        int endIdx = source.indexOf(&#x27;;&#x27;, idx);
+        return idx &lt; 0 ? &quot;&quot; : source.substring(idx + 8, endIdx).trim();
+    }
+
+    /** D1: after a flip to SHARED, imports whose simple name no longer occurs are dropped. */
+    private static String dropUnusedImports(String source) {
+        StringBuilder out = new StringBuilder();
+        for (String line : source.split(&quot;\n&quot;, -1)) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith(&quot;import &quot;) &amp;&amp; trimmed.endsWith(&quot;;&quot;)
+                    &amp;&amp; !trimmed.startsWith(&quot;import static&quot;)) {
+                String fqcn = trimmed.substring(7, trimmed.length() - 1).trim();
+                if (fqcn.startsWith(&quot;java.lang.&quot;) &amp;&amp; fqcn.chars().filter(c -&gt; c == &#x27;.&#x27;).count() == 2) {
+                    continue;   // W1 residue: java.lang imports are always redundant
+                }
+                String simple = fqcn.substring(fqcn.lastIndexOf(&#x27;.&#x27;) + 1);
+                String body = source.substring(source.indexOf(line) + line.length());
+                java.util.regex.Pattern usage = java.util.regex.Pattern.compile(
+                        &quot;\\b&quot; + java.util.regex.Pattern.quote(simple) + &quot;\\b&quot;);
+                if (!usage.matcher(body).find()) {
+                    continue;
+                }
+            }
+            out.append(line).append(&#x27;\n&#x27;);
+        }
+        String result = out.toString();
+        return result.substring(0, result.length() - 1);
+    }
+
+    /** D2: flips must not grow whitespace - blank runs are capped at two. */
+    private static String capBlankRuns(String source) {
+        String unified = source.replace(&quot;\r\n&quot;, &quot;\n&quot;);
+        return unified.replaceAll(&quot;\n{4,}&quot;, &quot;\n\n\n&quot;);
+    }
+
+    /** The fixture rendered as a full compilation unit (imports + class). */
+    private static String renderNested(SMCFixtureScanner.Facade facade) {
+        TypeSpec type = FixtureGenerator.nestedType(facade);
+        return JavaFile.builder(&quot;migrated&quot;, type).skipJavaLangImports(true).build().toString();
+    }
+
+    private static String classOf(String rendered) {
+        return rendered.substring(rendered.indexOf(&quot;private static final class&quot;));
+    }
+
+    private static String indent(String block) {
+        StringBuilder out = new StringBuilder();
+        for (String line : block.split(&quot;\n&quot;)) {
+            out.append(line.isBlank() ? &quot;&quot; : &quot;    &quot; + line).append(&#x27;\n&#x27;);
+        }
+        return out.toString();
+    }
+}
+</pre>
+<h4>tools/inject_smc_fixture.py</h4>
+<pre>#!/usr/bin/env python3
+&quot;&quot;&quot;
+fixture-housekeeper: manual inject/remove of testgen logger/config fixture boilerplate.
+
+Given a file of fully-qualified SUT class names, this hand tool adds or removes the
+standard fixture wiring (field + setup()/tearDown() install/restore lines, plus either
+a testsupport import or an embedded nested fixture class) in the matching *Test.java
+files under a test source root.
+
+Contract versus the Java FixturePlacementMigrator: that tool DETECTS facades by
+scanning the SUT; this tool performs NO detection. It trusts the operator&#x27;s class
+list and applies the fixed templates below. Anchor-based and skip-not-corrupt: any
+file that does not match expectations is reported as SKIP and left byte-identical.
+
+Usage:
+    python fixture_housekeeper.py --classes &lt;file&gt; --test-root &lt;src/test/java&gt;
+        --action &lt;inject-nested|remove-nested|inject-shared|remove-shared&gt;
+        --fixture &lt;logger|config|both&gt; [--dry-run]
+&quot;&quot;&quot;
+
+import argparse
+import difflib
+import re
+import sys
+from pathlib import Path
+
+
+# =============================================================================
+# TEMPLATE CONSTANTS — MUST TRACK THE GENERATOR.
+#
+# Everything in this section is a frozen copy of what testgen FixtureEmitter and
+# FixturePlacementMigrator actually emit (captured 2026-08-10 from the corpus in
+# operation/wip/tasks/testgenlite-v35rc-boilerdet-a11 at commit 4293d82).
+# If the generator&#x27;s fixture shape changes, these constants MUST be re-derived
+# from freshly emitted files or the tool will stop matching real tests.
+# =============================================================================
+
+NESTED_TRACE_LOGGER = &#x27;&#x27;&#x27;\
+    private static final class TraceLoggerFixture {
+      private final Map&lt;String, Object&gt; originals = new LinkedHashMap&lt;&gt;();
+
+      private ChannelWriter metricLogMock;
+
+      private ChannelWriter activityLogMock;
+
+      public ChannelWriter metricLogMock() {
+        return metricLogMock;
+      }
+
+      public ChannelWriter activityLogMock() {
+        return activityLogMock;
+      }
+
+      /**
+       * Swaps every delegate for a test double; restore() afterwards is mandatory.
+       */
+      public void install() throws Exception {
+        TraceLogger target = TraceLogger.getInstance(TraceLoggerFixture.class);
+        Field metricLogField = TraceLogger.class.getDeclaredField(&quot;metricLog&quot;);
+        metricLogField.setAccessible(true);
+        originals.put(&quot;metricLog&quot;, metricLogField.get(target));
+        metricLogMock = Mockito.mock(ChannelWriter.class);
+        metricLogField.set(target, metricLogMock);
+        Field activityLogField = TraceLogger.class.getDeclaredField(&quot;activityLog&quot;);
+        activityLogField.setAccessible(true);
+        originals.put(&quot;activityLog&quot;, activityLogField.get(target));
+        activityLogMock = Mockito.mock(ChannelWriter.class);
+        activityLogField.set(target, activityLogMock);
+      }
+
+      public void restore() throws Exception {
+        TraceLogger target = TraceLogger.getInstance(TraceLoggerFixture.class);
+        if (originals.containsKey(&quot;metricLog&quot;)) {
+          Field metricLogField = TraceLogger.class.getDeclaredField(&quot;metricLog&quot;);
+          metricLogField.setAccessible(true);
+          metricLogField.set(target, originals.get(&quot;metricLog&quot;));
+        }
+        if (originals.containsKey(&quot;activityLog&quot;)) {
+          Field activityLogField = TraceLogger.class.getDeclaredField(&quot;activityLog&quot;);
+          activityLogField.setAccessible(true);
+          activityLogField.set(target, originals.get(&quot;activityLog&quot;));
+        }
+      }
+    }&#x27;&#x27;&#x27;
+
+NESTED_AUDIT_LOG = &#x27;&#x27;&#x27;\
+    private static final class AuditLogFixture {
+      private final Map&lt;String, Object&gt; originals = new LinkedHashMap&lt;&gt;();
+
+      private AuditLog.LogWriter writerMock;
+
+      public AuditLog.LogWriter writerMock() {
+        return writerMock;
+      }
+
+      /**
+       * Swaps every delegate for a test double; restore() afterwards is mandatory.
+       */
+      public void install() throws Exception {
+        Field writerField = AuditLog.class.getDeclaredField(&quot;writer&quot;);
+        writerField.setAccessible(true);
+        originals.put(&quot;writer&quot;, writerField.get(null));
+        writerMock = Mockito.mock(AuditLog.LogWriter.class);
+        writerField.set(null, writerMock);
+      }
+
+      public void restore() throws Exception {
+        if (originals.containsKey(&quot;writer&quot;)) {
+          Field writerField = AuditLog.class.getDeclaredField(&quot;writer&quot;);
+          writerField.setAccessible(true);
+          writerField.set(null, originals.get(&quot;writer&quot;));
+        }
+      }
+    }&#x27;&#x27;&#x27;
+
+NESTED_SETTINGS_HUB = &#x27;&#x27;&#x27;\
+    private static final class SettingsHubFixture {
+      private final Map&lt;String, Object&gt; originals = new LinkedHashMap&lt;&gt;();
+
+      private LinkedHashMap&lt;Object, Object&gt; valuesValues;
+
+      public LinkedHashMap&lt;Object, Object&gt; valuesValues() {
+        return valuesValues;
+      }
+
+      /**
+       * Swaps every delegate for a test double; restore() afterwards is mandatory.
+       */
+      public void install() throws Exception {
+        Field valuesField = SettingsHub.class.getDeclaredField(&quot;values&quot;);
+        valuesField.setAccessible(true);
+        originals.put(&quot;values&quot;, valuesField.get(null));
+        valuesValues = new LinkedHashMap&lt;&gt;((Map&lt;?, ?&gt;) originals.get(&quot;values&quot;));
+        valuesField.set(null, valuesValues);
+      }
+
+      public void restore() throws Exception {
+        if (originals.containsKey(&quot;values&quot;)) {
+          Field valuesField = SettingsHub.class.getDeclaredField(&quot;values&quot;);
+          valuesField.setAccessible(true);
+          valuesField.set(null, originals.get(&quot;values&quot;));
+        }
+      }
+    }&#x27;&#x27;&#x27;
+
+
+class Fixture:
+    &quot;&quot;&quot;One known fixture: its wiring lines, imports, and nested class text.&quot;&quot;&quot;
+
+    def __init__(self, simple, kind, field_name, nested_text, nested_imports):
+        self.simple = simple
+        self.kind = kind
+        self.field_name = field_name
+        self.field_decl = (&#x27;private final %s %s = new %s();&#x27;
+                           % (simple, field_name, simple))
+        self.install_line = &#x27;%s.install();&#x27; % field_name
+        self.restore_line = &#x27;%s.restore();&#x27; % field_name
+        self.shared_import = &#x27;import testsupport.%s;&#x27; % simple
+        self.nested_anchor = &#x27;private static final class %s&#x27; % simple
+        self.nested_text = nested_text
+        self.nested_imports = nested_imports
+
+
+FIXTURES = {
+    &#x27;TraceLoggerFixture&#x27;: Fixture(
+        &#x27;TraceLoggerFixture&#x27;, &#x27;logger&#x27;, &#x27;traceLoggerFixture&#x27;, NESTED_TRACE_LOGGER,
+        [&#x27;java.lang.reflect.Field&#x27;, &#x27;java.util.LinkedHashMap&#x27;, &#x27;java.util.Map&#x27;,
+         &#x27;labshape.ChannelWriter&#x27;, &#x27;labshape.TraceLogger&#x27;, &#x27;org.mockito.Mockito&#x27;]),
+    &#x27;AuditLogFixture&#x27;: Fixture(
+        &#x27;AuditLogFixture&#x27;, &#x27;logger&#x27;, &#x27;auditLogFixture&#x27;, NESTED_AUDIT_LOG,
+        [&#x27;com.field.support.AuditLog&#x27;, &#x27;java.lang.reflect.Field&#x27;,
+         &#x27;java.util.LinkedHashMap&#x27;, &#x27;java.util.Map&#x27;, &#x27;org.mockito.Mockito&#x27;]),
+    &#x27;SettingsHubFixture&#x27;: Fixture(
+        &#x27;SettingsHubFixture&#x27;, &#x27;config&#x27;, &#x27;settingsHubFixture&#x27;, NESTED_SETTINGS_HUB,
+        [&#x27;com.field.support.SettingsHub&#x27;, &#x27;java.lang.reflect.Field&#x27;,
+         &#x27;java.util.LinkedHashMap&#x27;, &#x27;java.util.Map&#x27;]),
+}
+
+# Emission order the generator uses: logger fixture first, config fixture second.
+# setup() installs run in this order; tearDown() restores run in reverse.
+CANONICAL_ORDER = [&#x27;TraceLoggerFixture&#x27;, &#x27;AuditLogFixture&#x27;, &#x27;SettingsHubFixture&#x27;]
+
+# Which logger fixture belongs to which SUT package family (tracks the corpus).
+LOGGER_BY_PACKAGE = [(&#x27;labshape&#x27;, &#x27;TraceLoggerFixture&#x27;),
+                     (&#x27;com.field&#x27;, &#x27;AuditLogFixture&#x27;)]
+
+IMPORT_BEFORE_EACH = &#x27;import org.junit.jupiter.api.BeforeEach;&#x27;
+IMPORT_AFTER_EACH = &#x27;import org.junit.jupiter.api.AfterEach;&#x27;
+
+# ======================= end of generator-tracking constants =================
+
+
+class SkipFile(Exception):
+    &quot;&quot;&quot;Raised when a file does not match expectations; the file is left alone.&quot;&quot;&quot;
+
+
+class JavaFile:
+    &quot;&quot;&quot;A test file as lines, with its newline style preserved end to end.&quot;&quot;&quot;
+
+    def __init__(self, path):
+        self.path = path
+        raw = path.read_bytes()
+        try:
+            text = raw.decode(&#x27;utf-8&#x27;)
+        except UnicodeDecodeError:
+            raise SkipFile(&#x27;not valid UTF-8&#x27;)
+        self.eol = self._detect_eol(text)
+        self.ends_with_newline = text.endswith((&#x27;\n&#x27;, &#x27;\r\n&#x27;))
+        self.original_text = text
+        self.lines = text.replace(&#x27;\r\n&#x27;, &#x27;\n&#x27;).split(&#x27;\n&#x27;)
+        if self.ends_with_newline:
+            self.lines.pop()
+
+    @staticmethod
+    def _detect_eol(text):
+        crlf = text.count(&#x27;\r\n&#x27;)
+        if text.count(&#x27;\r&#x27;) != crlf:
+            raise SkipFile(&#x27;mixed or bare-CR line endings&#x27;)
+        if crlf and crlf != text.count(&#x27;\n&#x27;):
+            raise SkipFile(&#x27;mixed CRLF/LF line endings&#x27;)
+        return &#x27;\r\n&#x27; if crlf else &#x27;\n&#x27;
+
+    def render(self):
+        text = self.eol.join(self.lines)
+        return text + self.eol if self.ends_with_newline else text
+
+    def changed(self):
+        return self.render() != self.original_text
+
+
+def strip_comments_and_strings(text):
+    &quot;&quot;&quot;Blanks out //, /* */ comments and string/char literals for brace counting.&quot;&quot;&quot;
+    out = []
+    i, n, state = 0, len(text), None
+    while i &lt; n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 &lt; n else &#x27;&#x27;
+        if state is None:
+            if c == &#x27;/&#x27; and nxt == &#x27;/&#x27;:
+                state = &#x27;line&#x27;
+                i += 2
+                continue
+            if c == &#x27;/&#x27; and nxt == &#x27;*&#x27;:
+                state = &#x27;block&#x27;
+                i += 2
+                continue
+            if c in (&#x27;&quot;&#x27;, &quot;&#x27;&quot;):
+                state = c
+                i += 1
+                continue
+            out.append(c)
+        elif state == &#x27;line&#x27;:
+            if c == &#x27;\n&#x27;:
+                state = None
+                out.append(c)
+        elif state == &#x27;block&#x27;:
+            if c == &#x27;*&#x27; and nxt == &#x27;/&#x27;:
+                state = None
+                i += 1
+            elif c == &#x27;\n&#x27;:
+                out.append(c)
+        else:
+            if c == &#x27;\\&#x27;:
+                i += 1
+            elif c == state:
+                state = None
+            elif c == &#x27;\n&#x27;:
+                state = None    # unterminated literal: fail safe at line end
+                out.append(c)
+        i += 1
+    return &#x27;&#x27;.join(out)
+
+
+def check_brace_balance(java):
+    &quot;&quot;&quot;Whole-file brace sanity; a mismatch means we must not touch the file.&quot;&quot;&quot;
+    stripped = strip_comments_and_strings(&#x27;\n&#x27;.join(java.lines))
+    depth = 0
+    for c in stripped:
+        if c == &#x27;{&#x27;:
+            depth += 1
+        elif c == &#x27;}&#x27;:
+            depth -= 1
+        if depth &lt; 0:
+            raise SkipFile(&#x27;unbalanced braces&#x27;)
+    if depth != 0:
+        raise SkipFile(&#x27;unbalanced braces&#x27;)
+
+
+def code_lines(java):
+    &quot;&quot;&quot;Per-line comment/string-stripped view used for anchors and depth scans.&quot;&quot;&quot;
+    return strip_comments_and_strings(&#x27;\n&#x27;.join(java.lines)).split(&#x27;\n&#x27;)
+
+
+def find_class_block(java, test_simple_name):
+    &quot;&quot;&quot;Returns (open_idx, close_idx) of the test class declaration and its brace.&quot;&quot;&quot;
+    pattern = re.compile(
+        r&#x27;^\s*(public\s+)?(final\s+)?class\s+%s\b.*\{\s*$&#x27; % re.escape(test_simple_name))
+    stripped = code_lines(java)
+    open_idx = next((i for i, line in enumerate(stripped) if pattern.match(line)), None)
+    if open_idx is None:
+        raise SkipFile(&#x27;class anchor &quot;class %s {&quot; not found&#x27; % test_simple_name)
+    close_idx = matching_close(stripped, open_idx)
+    if close_idx is None:
+        raise SkipFile(&#x27;class closing brace not found&#x27;)
+    return open_idx, close_idx
+
+
+def matching_close(stripped, open_idx):
+    &quot;&quot;&quot;Line index whose brace returns the depth opened at open_idx to zero.&quot;&quot;&quot;
+    depth = 0
+    for i in range(open_idx, len(stripped)):
+        depth += stripped[i].count(&#x27;{&#x27;) - stripped[i].count(&#x27;}&#x27;)
+        if depth == 0:
+            return i
+    return None
+
+
+def find_lifecycle(java, annotation, p48_name):
+    &quot;&quot;&quot;
+    Finds the @BeforeEach/@AfterEach method; enforces the P48 name.
+
+    Returns (annotation_idx, signature_idx, close_idx) or None when absent.
+    &quot;&quot;&quot;
+    hits = [i for i, line in enumerate(java.lines) if line.strip() == annotation]
+    if not hits:
+        return None
+    if len(hits) &gt; 1:
+        raise SkipFile(&#x27;multiple %s methods&#x27; % annotation)
+    ann_idx = hits[0]
+    sig_idx = next((i for i in range(ann_idx + 1, len(java.lines))
+                    if java.lines[i].strip()), None)
+    sig = re.match(r&#x27;^\s*public\s+void\s+(\w+)\s*\([^)]*\)[^{]*\{\s*$&#x27;,
+                   java.lines[sig_idx] if sig_idx is not None else &#x27;&#x27;)
+    if not sig:
+        raise SkipFile(&#x27;%s not followed by a plain method signature&#x27; % annotation)
+    if sig.group(1) != p48_name:
+        raise SkipFile(&#x27;%s method is named %s, expected %s&#x27;
+                       % (annotation, sig.group(1), p48_name))
+    close_idx = matching_close(code_lines(java), sig_idx)
+    if close_idx is None:
+        raise SkipFile(&#x27;%s method has no closing brace&#x27; % p48_name)
+    return ann_idx, sig_idx, close_idx
+
+
+def member_indent(java, class_open):
+    &quot;&quot;&quot;Indentation of class members, taken from the first member line found.&quot;&quot;&quot;
+    for line in java.lines[class_open + 1:]:
+        if line.strip():
+            return line[:len(line) - len(line.lstrip())] or &#x27;  &#x27;
+    return &#x27;  &#x27;
+
+
+def host_package(java):
+    for line in java.lines:
+        match = re.match(r&#x27;^\s*package\s+([\w.]+)\s*;&#x27;, line)
+        if match:
+            return match.group(1)
+    raise SkipFile(&#x27;package declaration not found&#x27;)
+
+
+def word_used_outside_imports(java, word):
+    &quot;&quot;&quot;True when the simple name occurs anywhere except import lines.&quot;&quot;&quot;
+    body = &#x27;\n&#x27;.join(line for line in java.lines
+                     if not line.strip().startswith(&#x27;import &#x27;))
+    return re.search(r&#x27;\b%s\b&#x27; % re.escape(word), body) is not None
+
+
+def add_import(java, import_line):
+    &quot;&quot;&quot;Inserts an import in alphabetical order; no-op when already present.&quot;&quot;&quot;
+    if any(line.strip() == import_line for line in java.lines):
+        return
+    import_idxs = [i for i, line in enumerate(java.lines)
+                   if line.strip().startswith(&#x27;import &#x27;)]
+    if import_idxs:
+        after = [i for i in import_idxs if java.lines[i].strip() &gt; import_line]
+        at = after[0] if after else import_idxs[-1] + 1
+    else:
+        pkg_idx = next(i for i, line in enumerate(java.lines)
+                       if line.strip().startswith(&#x27;package &#x27;))
+        java.lines.insert(pkg_idx + 1, &#x27;&#x27;)
+        at = pkg_idx + 2
+    java.lines.insert(at, import_line)
+
+
+def remove_import_if_unused(java, import_line):
+    &quot;&quot;&quot;Drops an import the tool may have added, when its name is no longer used.&quot;&quot;&quot;
+    simple = import_line.rstrip(&#x27;;&#x27;).split(&#x27;.&#x27;)[-1]
+    for i, line in enumerate(java.lines):
+        if line.strip() == import_line:
+            if not word_used_outside_imports(java, simple):
+                del java.lines[i]
+            return
+
+
+def cap_blank_runs(java):
+    &quot;&quot;&quot;Edits must never grow whitespace: blank runs are capped at two lines.&quot;&quot;&quot;
+    out, run = [], 0
+    for line in java.lines:
+        run = run + 1 if not line.strip() else 0
+        if run &lt;= 2:
+            out.append(line)
+    java.lines = out
+
+
+def fixture_presence(java, fixture):
+    &quot;&quot;&quot;Returns &#x27;shared&#x27;, &#x27;nested&#x27;, &#x27;wired&#x27; (lines only), or None.&quot;&quot;&quot;
+    text = &#x27;\n&#x27;.join(java.lines)
+    if fixture.shared_import in text:
+        return &#x27;shared&#x27;
+    if fixture.nested_anchor in text:
+        return &#x27;nested&#x27;
+    if fixture.field_decl in text or fixture.install_line in text:
+        return &#x27;wired&#x27;
+    return None
+
+
+def check_no_name_conflict(java, fixture):
+    &quot;&quot;&quot;A same-named member that is not our exact wiring means hands off.&quot;&quot;&quot;
+    if word_used_outside_imports(java, fixture.field_name):
+        raise SkipFile(&#x27;field name %s already in use&#x27; % fixture.field_name)
+    if word_used_outside_imports(java, fixture.simple):
+        raise SkipFile(&#x27;type name %s already in use&#x27; % fixture.simple)
+
+
+# ----------------------------------------------------------------- injection
+
+
+def ensure_lifecycle_methods(java, class_open, class_close, indent):
+    &quot;&quot;&quot;Creates setup()/tearDown() with P48 names when absent; returns nothing.&quot;&quot;&quot;
+    if find_lifecycle(java, &#x27;@BeforeEach&#x27;, &#x27;setup&#x27;) is None:
+        at = first_annotation_line(java, class_open, class_close)
+        block = [indent + &#x27;@BeforeEach&#x27;,
+                 indent + &#x27;public void setup() throws Exception {&#x27;,
+                 indent + &#x27;}&#x27;,
+                 &#x27;&#x27;]
+        java.lines[at:at] = block
+        add_import(java, IMPORT_BEFORE_EACH)
+    if find_lifecycle(java, &#x27;@AfterEach&#x27;, &#x27;tearDown&#x27;) is None:
+        _, _, setup_close = find_lifecycle(java, &#x27;@BeforeEach&#x27;, &#x27;setup&#x27;)
+        at = setup_close + 1
+        if at &lt; len(java.lines) and not java.lines[at].strip():
+            at += 1
+        block = [indent + &#x27;@AfterEach&#x27;,
+                 indent + &#x27;public void tearDown() throws Exception {&#x27;,
+                 indent + &#x27;}&#x27;,
+                 &#x27;&#x27;]
+        java.lines[at:at] = block
+        add_import(java, IMPORT_AFTER_EACH)
+
+
+def first_annotation_line(java, class_open, class_close):
+    &quot;&quot;&quot;Insertion point for a created setup(): before the first method annotation.&quot;&quot;&quot;
+    for i in range(class_open + 1, class_close):
+        if java.lines[i].strip().startswith(&#x27;@&#x27;):
+            return i
+    return class_close
+
+
+def insert_field(java, fixture, class_open, indent):
+    &quot;&quot;&quot;Adds the fixture field as a first member, after canonical-earlier fields.&quot;&quot;&quot;
+    at = class_open + 1
+    for name in CANONICAL_ORDER:
+        if name == fixture.simple:
+            break
+        earlier = FIXTURES[name]
+        if at &lt; len(java.lines) and java.lines[at].strip() == earlier.field_decl:
+            at += 1
+            if at &lt; len(java.lines) and not java.lines[at].strip():
+                at += 1
+    java.lines[at:at] = [indent + fixture.field_decl, &#x27;&#x27;]
+
+
+def insert_install(java, fixture, indent):
+    &quot;&quot;&quot;Install goes at the top of setup(); logger installs before config ones.&quot;&quot;&quot;
+    _, sig_idx, close_idx = find_lifecycle(java, &#x27;@BeforeEach&#x27;, &#x27;setup&#x27;)
+    body_indent = indent * 2
+    at = sig_idx + 1
+    if fixture.kind == &#x27;config&#x27;:
+        at = after_last_known_line(java, sig_idx, close_idx,
+                                   known_install_lines(&#x27;logger&#x27;), at)
+    java.lines.insert(at, body_indent + fixture.install_line)
+
+
+def insert_restore(java, fixture, indent):
+    &quot;&quot;&quot;Restore order mirrors install in reverse: config restores before logger.&quot;&quot;&quot;
+    _, sig_idx, close_idx = find_lifecycle(java, &#x27;@AfterEach&#x27;, &#x27;tearDown&#x27;)
+    body_indent = indent * 2
+    at = sig_idx + 1
+    if fixture.kind == &#x27;logger&#x27;:
+        at = after_last_known_line(java, sig_idx, close_idx,
+                                   known_restore_lines(&#x27;config&#x27;), at)
+    java.lines.insert(at, body_indent + fixture.restore_line)
+
+
+def known_install_lines(kind):
+    return [f.install_line for f in FIXTURES.values() if f.kind == kind]
+
+
+def known_restore_lines(kind):
+    return [f.restore_line for f in FIXTURES.values() if f.kind == kind]
+
+
+def after_last_known_line(java, sig_idx, close_idx, known, default):
+    &quot;&quot;&quot;Index just past the last known line inside the method body, else default.&quot;&quot;&quot;
+    at = default
+    for i in range(sig_idx + 1, close_idx):
+        if java.lines[i].strip() in known:
+            at = i + 1
+    return at
+
+
+def inject(java, fixture, placement, test_root):
+    &quot;&quot;&quot;Injects one fixture (shared or nested placement) into the file.&quot;&quot;&quot;
+    presence = fixture_presence(java, fixture)
+    if presence:
+        raise SkipFile(&#x27;%s already present (%s)&#x27; % (fixture.simple, presence))
+    check_no_name_conflict(java, fixture)
+
+    if placement == &#x27;shared&#x27;:
+        support = test_root / &#x27;testsupport&#x27; / (fixture.simple + &#x27;.java&#x27;)
+        if not support.is_file():
+            raise SkipFile(&#x27;missing %s&#x27; % support)
+
+    test_name = Path(java.path).stem
+    class_open, class_close = find_class_block(java, test_name)
+    indent = member_indent(java, class_open)
+    pkg = host_package(java)
+
+    if placement == &#x27;shared&#x27;:
+        add_import(java, fixture.shared_import)
+    else:
+        block = fixture.nested_text.split(&#x27;\n&#x27;)
+        if java.lines[class_close - 1].strip():
+            block = [&#x27;&#x27;] + block
+        java.lines[class_close:class_close] = block
+        for fqcn in fixture.nested_imports:
+            if fqcn.rsplit(&#x27;.&#x27;, 1)[0] != pkg:
+                add_import(java, &#x27;import %s;&#x27; % fqcn)
+
+    class_open, class_close = find_class_block(java, test_name)
+    insert_field(java, fixture, class_open, indent)
+    class_open, class_close = find_class_block(java, test_name)
+    ensure_lifecycle_methods(java, class_open, class_close, indent)
+    insert_install(java, fixture, indent)
+    insert_restore(java, fixture, indent)
+
+
+# ------------------------------------------------------------------- removal
+
+
+def remove_line(java, content):
+    &quot;&quot;&quot;Removes the first line with this stripped content; True when found.&quot;&quot;&quot;
+    for i, line in enumerate(java.lines):
+        if line.strip() == content:
+            del java.lines[i]
+            return True
+    return False
+
+
+def remove_field(java, fixture):
+    &quot;&quot;&quot;Removes the field line plus the single blank separator the tool adds.&quot;&quot;&quot;
+    for i, line in enumerate(java.lines):
+        if line.strip() == fixture.field_decl:
+            del java.lines[i]
+            if i &lt; len(java.lines) and not java.lines[i].strip():
+                del java.lines[i]
+            return
+
+
+def remove_nested_block(java, fixture):
+    &quot;&quot;&quot;
+    Cuts the embedded nested class block, located by its anchor line.
+
+    Inject adds a separating blank line only when the block would touch the
+    previous member; removal mirrors that exactly — the single preceding blank
+    goes only when its own predecessor is non-blank. Without this pairing a
+    nested round trip on a generator-shaped file would grow the file.
+    &quot;&quot;&quot;
+    stripped = code_lines(java)
+    start = next((i for i, line in enumerate(java.lines)
+                  if line.strip().startswith(fixture.nested_anchor)), None)
+    if start is None:
+        raise SkipFile(&#x27;nested anchor missing for %s&#x27; % fixture.simple)
+    end = matching_close(stripped, start)
+    if end is None:
+        raise SkipFile(&#x27;nested block unbalanced for %s&#x27; % fixture.simple)
+    del java.lines[start:end + 1]
+    if (start &gt; 1 and not java.lines[start - 1].strip()
+            and java.lines[start - 2].strip()):
+        del java.lines[start - 1]
+
+
+def remove_empty_lifecycle(java, annotation, p48_name):
+    &quot;&quot;&quot;Drops a lifecycle method the removal emptied, plus its trailing blank.&quot;&quot;&quot;
+    found = find_lifecycle(java, annotation, p48_name)
+    if found is None:
+        return
+    ann_idx, sig_idx, close_idx = found
+    body = [line for line in java.lines[sig_idx + 1:close_idx] if line.strip()]
+    if body:
+        return
+    del java.lines[ann_idx:close_idx + 1]
+    if ann_idx &lt; len(java.lines) and not java.lines[ann_idx].strip():
+        del java.lines[ann_idx]
+    import_line = (IMPORT_BEFORE_EACH if annotation == &#x27;@BeforeEach&#x27;
+                   else IMPORT_AFTER_EACH)
+    remove_import_if_unused(java, import_line)
+
+
+def remove(java, fixture, placement):
+    &quot;&quot;&quot;Removes one fixture&#x27;s wiring; strictly the reverse of inject.&quot;&quot;&quot;
+    presence = fixture_presence(java, fixture)
+    if presence is None:
+        raise SkipFile(&#x27;%s not present&#x27; % fixture.simple)
+    if presence == &#x27;wired&#x27;:
+        raise SkipFile(&#x27;%s wiring present without import or nested class&#x27;
+                       % fixture.simple)
+    if presence != placement:
+        raise SkipFile(&#x27;%s present as %s; use remove-%s&#x27;
+                       % (fixture.simple, presence, presence))
+
+    if placement == &#x27;shared&#x27;:
+        remove_line(java, fixture.shared_import)
+    else:
+        remove_nested_block(java, fixture)
+
+    remove_field(java, fixture)
+    remove_line(java, fixture.install_line)
+    remove_line(java, fixture.restore_line)
+    remove_empty_lifecycle(java, &#x27;@BeforeEach&#x27;, &#x27;setup&#x27;)
+    remove_empty_lifecycle(java, &#x27;@AfterEach&#x27;, &#x27;tearDown&#x27;)
+
+    if placement == &#x27;nested&#x27;:
+        for fqcn in fixture.nested_imports:
+            remove_import_if_unused(java, &#x27;import %s;&#x27; % fqcn)
+
+
+# ------------------------------------------------------------------ resolve
+
+
+def read_classes(classes_file):
+    &quot;&quot;&quot;SUT class names, one per line; blanks and # comments ignored.&quot;&quot;&quot;
+    names = []
+    for line in classes_file.read_text(encoding=&#x27;utf-8&#x27;).splitlines():
+        line = line.strip()
+        if line and not line.startswith(&#x27;#&#x27;):
+            names.append(line)
+    return names
+
+
+def test_file_for(test_root, fqcn):
+    parts = fqcn.split(&#x27;.&#x27;)
+    return test_root.joinpath(*parts[:-1], parts[-1] + &#x27;Test.java&#x27;)
+
+
+def fixtures_for_inject(fqcn, kinds):
+    &quot;&quot;&quot;Registry lookup, no detection: which fixtures inject for this SUT.&quot;&quot;&quot;
+    chosen = []
+    if &#x27;logger&#x27; in kinds:
+        pkg = fqcn.rsplit(&#x27;.&#x27;, 1)[0]
+        name = next((fix for prefix, fix in LOGGER_BY_PACKAGE
+                     if pkg == prefix or pkg.startswith(prefix + &#x27;.&#x27;)), None)
+        if name is None:
+            raise SkipFile(&#x27;no logger fixture mapping for package of %s&#x27; % fqcn)
+        chosen.append(FIXTURES[name])
+    if &#x27;config&#x27; in kinds:
+        chosen.append(FIXTURES[&#x27;SettingsHubFixture&#x27;])
+    return in_canonical_order(chosen)
+
+
+def fixtures_for_remove(java, kinds):
+    &quot;&quot;&quot;Whichever known fixtures of the requested kinds are actually in the file.&quot;&quot;&quot;
+    present = [f for f in FIXTURES.values()
+               if f.kind in kinds and fixture_presence(java, f)]
+    if not present:
+        raise SkipFile(&#x27;no %s fixture present&#x27; % &#x27;/&#x27;.join(sorted(kinds)))
+    return in_canonical_order(present)
+
+
+def in_canonical_order(fixtures):
+    return sorted(fixtures, key=lambda f: CANONICAL_ORDER.index(f.simple))
+
+
+# --------------------------------------------------------------------- main
+
+
+def process_class(fqcn, args, test_root):
+    &quot;&quot;&quot;Runs the action for one SUT class; returns (status, detail) for the report.&quot;&quot;&quot;
+    path = test_file_for(test_root, fqcn)
+    if not path.is_file():
+        return &#x27;SKIP&#x27;, &#x27;test file not found: %s&#x27; % path
+
+    java = JavaFile(path)
+    check_brace_balance(java)
+    find_class_block(java, path.stem)
+
+    mode, placement = args.action.split(&#x27;-&#x27;)
+    kinds = {&#x27;both&#x27;: {&#x27;logger&#x27;, &#x27;config&#x27;}}.get(args.fixture, {args.fixture})
+
+    if mode == &#x27;inject&#x27;:
+        chosen = fixtures_for_inject(fqcn, kinds)
+    else:
+        chosen = fixtures_for_remove(java, kinds)
+
+    applied, skipped = [], []
+    for fixture in chosen:
+        before = list(java.lines)
+        try:
+            if mode == &#x27;inject&#x27;:
+                inject(java, fixture, placement, test_root)
+            else:
+                remove(java, fixture, placement)
+            applied.append(fixture.simple)
+        except SkipFile as reason:
+            java.lines = before
+            skipped.append(&#x27;%s (%s)&#x27; % (fixture.simple, reason))
+
+    if not applied:
+        return &#x27;SKIP&#x27;, &#x27;; &#x27;.join(skipped) + &#x27; -&gt; %s&#x27; % path
+
+    cap_blank_runs(java)
+    detail = &#x27;%s -&gt; %s&#x27; % (&#x27;+&#x27;.join(applied), path)
+    if skipped:
+        detail += &#x27; [skipped: %s]&#x27; % &#x27;; &#x27;.join(skipped)
+    if args.dry_run:
+        diff = difflib.unified_diff(
+            java.original_text.splitlines(), java.render().splitlines(),
+            fromfile=str(path), tofile=&#x27;%s (%s)&#x27; % (path, args.action), lineterm=&#x27;&#x27;)
+        print(&#x27;\n&#x27;.join(diff))
+        return &#x27;DRY-RUN&#x27;, detail
+    path.write_bytes(java.render().encode(&#x27;utf-8&#x27;))
+    return mode.upper(), detail
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(
+        prog=&#x27;fixture_housekeeper&#x27;,
+        description=&#x27;Inject or remove testgen logger/config fixture boilerplate.&#x27;)
+    parser.add_argument(&#x27;--classes&#x27;, required=True, type=Path,
+                        help=&#x27;file with one fully-qualified SUT class per line&#x27;)
+    parser.add_argument(&#x27;--test-root&#x27;, required=True, type=Path,
+                        help=&#x27;test source root, e.g. &lt;project&gt;/src/test/java&#x27;)
+    parser.add_argument(&#x27;--action&#x27;, required=True,
+                        choices=[&#x27;inject-nested&#x27;, &#x27;remove-nested&#x27;,
+                                 &#x27;inject-shared&#x27;, &#x27;remove-shared&#x27;])
+    parser.add_argument(&#x27;--fixture&#x27;, required=True,
+                        choices=[&#x27;logger&#x27;, &#x27;config&#x27;, &#x27;both&#x27;])
+    parser.add_argument(&#x27;--dry-run&#x27;, action=&#x27;store_true&#x27;,
+                        help=&#x27;print the would-be diff; write nothing&#x27;)
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    if not args.classes.is_file():
+        print(&#x27;ERROR classes file not found: %s&#x27; % args.classes)
+        return 2
+    test_root = args.test_root.resolve()
+    if not test_root.is_dir():
+        print(&#x27;ERROR test root not found: %s&#x27; % test_root)
+        return 2
+
+    counts = {}
+    for fqcn in read_classes(args.classes):
+        try:
+            status, detail = process_class(fqcn, args, test_root)
+        except SkipFile as reason:
+            status, detail = &#x27;SKIP&#x27;, &#x27;%s -&gt; %s&#x27; % (reason, test_file_for(test_root, fqcn))
+        counts[status] = counts.get(status, 0) + 1
+        print(&#x27;[%s] %s %s&#x27; % (status, fqcn, detail))
+
+    print(&#x27;summary: &#x27; + &#x27;, &#x27;.join(&#x27;%s=%d&#x27; % kv for kv in sorted(counts.items())))
+    return 0
+
+
+if __name__ == &#x27;__main__&#x27;:
+    sys.exit(main())
+</pre>
 </div>
 
 </body>
