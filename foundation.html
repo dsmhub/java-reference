@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI working-system design - foundation</title>
+<style>
+  :root { --bg: #f6f5f1; --text: #1d1d1b; --muted: #6b6a65; --line: #dcdad3; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16181c; --text: #e6e4de; --muted: #9a988f; --line: #343840; }
+  }
+  body { background: var(--bg); color: var(--text); font: 17px/1.6 system-ui, sans-serif; margin: 0; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 16px 56px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 20px; }
+  ol li { margin: 10px 0; }
+  .purpose { border-left: 3px solid var(--line); padding: 8px 14px; margin: 18px 0; font-weight: 600; }
+  .src { color: var(--muted); font-size: 0.9em; margin-top: 28px; border-top: 1px solid var(--line); padding-top: 10px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>AI working-system design &mdash; foundation</h1>
+  <p class="lead">Agreed 13 Nov 2026 between Admin and agent12. Clean-sheet design; nothing existing shapes it. This page must survive every session, model and device.</p>
+
+  <p class="purpose">Purpose (step 0, open for Admin's final word): the system makes Admin's accumulated understanding &mdash; problems, decisions, corrections, tools &mdash; outlive any session, any model and any single machine, while staying small enough to be read by Admin or a model in a minute.</p>
+
+  <h2>The ten essences (the shape)</h2>
+  <ol>
+    <li><strong>Problem class over instance</strong> &mdash; strip any problem to its solution-free trunk; one solved trunk pre-solves future leaves. Ask with: "restate the problem solution-free" / "problem class, not my instance".</li>
+    <li><strong>Work has no clean edges</strong> &mdash; engineering is one continuous, entangled story; capture happens when understanding changes, because "the end" never comes.</li>
+    <li><strong>The model is stateless and probabilistic</strong> &mdash; it reasons per call, retains nothing, misses things; whatever must persist lives in files, never in a session.</li>
+    <li><strong>Sessions are perishable containers</strong> &mdash; quality accumulating inside long-lived sessions dies with them; sessions must be disposable, interchangeable processors over durable files.</li>
+    <li><strong>Attention is bought with tokens</strong> &mdash; force-feed only the few must-not-miss lines; everything else behind pointers, or the cure becomes the noise.</li>
+    <li><strong>The collaboration cost sits with Admin</strong> &mdash; making models understand, decoding answers, re-teaching every session; the system exists to push that cost down permanently.</li>
+    <li><strong>Not everything is a rule</strong> &mdash; the tacit layer cannot be legislated and dies with the session (a fundamental limit); whole worked exchanges transmit disposition better than rules, so keep a few of them as artifacts.</li>
+    <li><strong>Delivery is a dialogue loop</strong> &mdash; shared facts first, one checkable bite, inspect together, then the next; never a dumped plate; never prescribe a file edit without quoting what is there (before/after).</li>
+    <li><strong>Quick, tangible wins now</strong> &mdash; if it can be done today, it is done today; "with time" is the exception, not the rhythm.</li>
+    <li><strong>Clean sheet</strong> &mdash; design from these truths; what already exists is judged against the design afterwards (keep, migrate, discard), never bent into it.</li>
+    <li><strong>Rules collide and gaps get filled silently</strong> &mdash; directives written in one context (at the desk) keep applying in others (away from it), and where no rule speaks, the model fills the silence with the convenient assumption; the system must let collisions be seen and make the model surface an unstated gap instead of assuming through it. (Added 13 Nov: live case &mdash; "hand over full file paths" rules collided with Admin not being at the machine.)</li>
+  </ol>
+
+  <p class="src">Source: conversation of 13 Nov 2026 in session agent12 (transcript b1ecabbe-cdbb-41ec-95df-7b80d85ac180) &mdash; itself a worked example per essence 7. Target machine for the build: the work Mac. Next step: derive the system's parts from these ten, one bite at a time.</p>
+</main>
+</body>
+</html>
