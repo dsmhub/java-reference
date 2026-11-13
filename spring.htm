@@ -396,48 +396,6 @@ div.WordSection1
 
 </div>
 
-
-<!-- BEGIN ai-home-bootstrap (temporary; remove this whole fenced block in one sweep) -->
-<hr>
-<div style="max-width:760px;margin:24px auto;font-family:system-ui,sans-serif">
-<h2>AI home bootstrap (temporary)</h2>
-<p>Three files for the knowledge home + the CLAUDE.md pointer. Copy each box as-is.</p>
-
-<h3>profile.md</h3>
-<pre style="background:#f4f4f4;padding:12px;white-space:pre-wrap"># Working agreement
-- Work one bite at a time: confirm shared facts, one checkable step, wait, adjust.
-- Decide fast on what's decidable; bites apply to building and changing, not answering.
-- Never prescribe a file change without quoting its current text first.
-- Plain language, short answers; I escalate if I want more.
-- When a problem is raised: restate it solution-free (problem class, not instance),
-  then check register.md before reasoning from scratch.
-- Append to log.md the moment anything is learned, decided or blocked.
-- Drill your own answer before returning it; report conclusions and exceptions, never the drilling.
-- Do not assume where I am or what I can reach; deliver through the conversation.</pre>
-
-<h3>register.md</h3>
-<pre style="background:#f4f4f4;padding:12px;white-space:pre-wrap"># Problem Register - one entry per problem CLASS
-Shape: name / essence (one sentence, solution-free) / constraints / solution families / tools.
-
-## log-attribution
-Essence: a system you cannot rerun produced an output; attribute it to its producer
-using only what it leaves behind (logs and deployed artifacts).
-Constraints: producer may be anywhere in the runtime closure; text may be assembled
-at runtime; local != deployed, so inspect the deployed artifacts.
-Families: self-identifying logs (config-only) | static sweep of source + all jars | tracing where rerun is possible.
-Tools: jargrep.</pre>
-
-<h3>log.md</h3>
-<pre style="background:#f4f4f4;padding:12px;white-space:pre-wrap"># Capture Log
-YYYY-MM-DD | project | learned/decided/blocked | one line.
-Distil into register.md when a pattern repeats; strike distilled lines.</pre>
-
-<h3>CLAUDE.md addition</h3>
-<pre style="background:#f4f4f4;padding:12px;white-space:pre-wrap"># Knowledge home - &lt;folder path&gt;
-Read profile.md, register.md, log.md at session start; obey profile.md throughout.</pre>
-</div>
-<!-- END ai-home-bootstrap -->
-
 </body>
 
 </html>
